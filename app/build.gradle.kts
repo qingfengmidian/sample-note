@@ -39,6 +39,11 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        // Robolectric 单测需能访问 debug assets 中的 fixtures
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -68,6 +73,7 @@ dependencies {
     // 单元测试
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
     // 仪器测试（espresso 3.7.0 起兼容新版 Android 移除 InputManager.getInstance 的变更）
@@ -77,3 +83,27 @@ dependencies {
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
+
+// M1: 测试夹具生成（buildSrc/FixtureGenerator），产物不入库
+val generateFixtures = tasks.register("generateFixtures") {
+    group = "build"
+    description = "生成测试夹具到 test resources 与 debug assets"
+    outputs.dir("src/test/resources/fixtures")
+    outputs.dir("src/debug/assets/fixtures")
+    doLast {
+        FixtureGenerator.generate(file("src/test/resources/fixtures"))
+        FixtureGenerator.generate(file("src/debug/assets/fixtures"))
+    }
+}
+// M1 验证：fixtures 校验 task，确认样本编码与结构符合《测试用例》§0 描述
+val validateFixtures = tasks.register("validateFixtures") {
+    group = "verification"
+    description = "校验 fixtures 编码与结构符合《测试用例》§0 描述"
+    dependsOn(generateFixtures)
+    doLast {
+        FixtureGenerator.validate(file("src/test/resources/fixtures"))
+    }
+}
+tasks.matching { it.name == "preBuild" || it.name == "testDebugUnitTest" || it.name == "connectedDebugAndroidTest" }
+    .configureEach { dependsOn(generateFixtures) }
+tasks.named("check") { dependsOn(validateFixtures) }
