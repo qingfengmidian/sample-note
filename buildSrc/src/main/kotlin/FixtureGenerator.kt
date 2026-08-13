@@ -184,6 +184,12 @@ object FixtureGenerator {
         epub(dir, "no_nav.epub",
             opf(chapters, ncx = false, nav = false),
             chapters.toMap())
+
+        // M2 追加（TC-UT-06a）：OPF 的 manifest/spine 引用 ch1.xhtml，但 zip 中并不存在该条目
+        // → 结构错误且无任何字节可供降级，应抛 ParseException.MalformedContent
+        epub(dir, "malformed.epub",
+            opf(listOf("ch1.xhtml" to ""), ncx = false, nav = false),
+            emptyMap())
     }
 
     private fun xhtml(title: String, body: String, encoding: String = "UTF-8") = """
@@ -334,7 +340,8 @@ object FixtureGenerator {
         }
 
         listOf("sample.epub", "sample3.epub", "hybrid.epub", "many_chapters.epub",
-            "nested_toc.epub", "mixed_encoding.epub", "bad_decl.epub", "broken.epub", "no_nav.epub")
+            "nested_toc.epub", "mixed_encoding.epub", "bad_decl.epub", "broken.epub", "no_nav.epub",
+            "malformed.epub")
             .forEach { name ->
                 val e = entries(name)
                 check(e["mimetype"]?.toString(Charsets.US_ASCII) == "application/epub+zip",
@@ -373,6 +380,12 @@ object FixtureGenerator {
             "mixed_encoding.epub 章节应可用 GBK 解码")
         check(entries("no_nav.epub").keys.none { it.endsWith("nav.xhtml") || it.endsWith("toc.ncx") },
             "no_nav.epub 应不含导航文件")
+
+        // M2 追加（TC-UT-06a）
+        val malformed = entries("malformed.epub")
+        check(malformed["OEBPS/content.opf"]?.toString(Charsets.UTF_8)?.contains("ch1.xhtml") == true
+            && !malformed.containsKey("OEBPS/ch1.xhtml"),
+            "malformed.epub 的 manifest/spine 应引用 zip 中不存在的 ch1.xhtml")
     }
 }
 
