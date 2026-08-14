@@ -76,6 +76,10 @@ dependencies {
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
+    // M3: Compose UI Test on Robolectric（TC-UI-01/02/03），BOM 管版本
+    testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+
     // 仪器测试（espresso 3.7.0 起兼容新版 Android 移除 InputManager.getInstance 的变更）
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")

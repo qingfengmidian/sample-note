@@ -7,8 +7,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.sample.docreader.ui.AppTheme
-import com.sample.docreader.ui.HomeScreen
+import com.sample.docreader.ui.FixtureEntryScreen
 import com.sample.docreader.ui.SettingsScreen
+import com.sample.docreader.ui.reader.ReaderScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -17,9 +18,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             AppTheme {
                 val navController = rememberNavController()
-                NavHost(navController = navController, startDestination = "home") {
-                    composable("home") {
-                        HomeScreen(onOpenSettings = { navController.navigate("settings") })
+                // M3 起点为 fixtures 选择入口；M4 替换为 HomeScreen（最近列表 + SAF）
+                NavHost(navController = navController, startDestination = "fixtures") {
+                    composable("fixtures") {
+                        FixtureEntryScreen(
+                            onOpenFixture = { name -> navController.navigate("reader/$name") },
+                            onOpenSettings = { navController.navigate("settings") }
+                        )
+                    }
+                    composable("reader/{name}") { entry ->
+                        ReaderScreen(
+                            name = entry.arguments?.getString("name").orEmpty(),
+                            onBack = { navController.popBackStack() }
+                        )
                     }
                     composable("settings") {
                         SettingsScreen(onBack = { navController.popBackStack() })

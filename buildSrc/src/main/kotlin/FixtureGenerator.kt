@@ -81,6 +81,9 @@ object FixtureGenerator {
         // large.txt ≈ 8 MB；huge.txt ≈ 15 MB（超出 10 MB 编辑上限）
         write(dir, "large.txt", Charsets.UTF_8, repeatedText(8 * 1024 * 1024))
         write(dir, "huge.txt", Charsets.UTF_8, repeatedText(15 * 1024 * 1024))
+
+        // M3 追加（TC-F2-24）：0 字节空文件
+        write(dir, "empty.txt", Charsets.UTF_8, "")
     }
 
     private fun repeatedText(targetBytes: Int): String {
@@ -321,6 +324,10 @@ object FixtureGenerator {
             "large.txt 应约 8 MB")
         check(File(dir, "huge.txt").length() in (14 * 1024 * 1024)..(16 * 1024 * 1024),
             "huge.txt 应约 15 MB")
+
+        // M3 追加（TC-F2-24）
+        check(File(dir, "empty.txt").let { it.isFile && it.length() == 0L },
+            "empty.txt 应为 0 字节空文件")
     }
 
     private fun epubChecks(dir: File) {

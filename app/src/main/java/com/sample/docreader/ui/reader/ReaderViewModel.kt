@@ -1,0 +1,118 @@
+package com.sample.docreader.ui.reader
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.sample.docreader.core.io.FileOpener
+import com.sample.docreader.core.model.DocFormat
+import com.sample.docreader.core.model.Document
+import com.sample.docreader.core.model.ParseException
+import com.sample.docreader.core.model.ReaderFont
+import com.sample.docreader.core.model.ReadingSettings
+import com.sample.docreader.core.model.ReadingTheme
+import com.sample.docreader.core.model.WrapMode
+import com.sample.docreader.core.parse.ParserFactory
+import com.sample.docreader.core.parse.PlainTextParser
+import com.sample.docreader.core.parse.TxtParser
+import com.sample.docreader.core.settings.SettingsRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+/** 阅读界面状态（设计§3.3：ReaderViewModel 向 UI 暴露单个 StateFlow） */
+data class ReaderUiState(
+    val loading: Boolean = true,
+    val document: Document? = null,
+    val settings: ReadingSettings = ReadingSettings(),
+    val error: String? = null       // ParseException 差异化文案
+)
+
+/**
+ * 阅读器 ViewModel：持有 Document + ReadingSettings。
+ * 加载经 FileOpener 桩读字节 + ParserFactory 分发（txt→TxtParser，md/xml→PlainTextParser）；
+ * epub 阅读为 M5，本里程碑视为不支持。
+ */
+class ReaderViewModel(
+    private val fileOpener: FileOpener,
+    private val settingsRepository: SettingsRepository
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(ReaderUiState())
+    val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
+
+    init {
+        // 全局设置变化即时反映到阅读界面
+        viewModelScope.launch {
+            settingsRepository.settings.collect { s -> _uiState.update { it.copy(settings = s) } }
+        }
+    }
+
+    fun load(uri: String, format: DocFormat) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(loading = true, error = null) }
+            try {
+                val bytes = fileOpener.open(uri).use { it.readBytes() }
+                val name = uri.substringAfterLast('/')
+                val document = parseBytes(bytes, name, uri, format)
+                _uiState.update { it.copy(loading = false, document = document) }
+            } catch (e: ParseException) {
+                _uiState.update { it.copy(loading = false, error = e.message) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 文件读不到（被移动/删除等）统一按无权限提示
+                _uiState.update { it.copy(loading = false, error = ParseException.NoPermission().message) }
+            }
+        }
+    }
+
+    private suspend fun parseBytes(bytes: ByteArray, name: String, uri: String, format: DocFormat): Document =
+        when (val parser = ParserFactory.forFormat(format)) {
+            is TxtParser -> parser.parseBytes(bytes, name, uri)
+            is PlainTextParser -> parser.parseBytes(bytes, name, uri)
+            else -> throw ParseException.UnsupportedFormat()
+        }
+
+    /** 设置改动即时生效（先更新 StateFlow）并经 SettingsRepository 持久化（全局共享，F3.3） */
+    fun updateSettings(transform: (ReadingSettings) -> ReadingSettings) {
+        val newSettings = transform(_uiState.value.settings)
+        _uiState.update { it.copy(settings = newSettings) }
+        viewModelScope.launch { settingsRepository.save(newSettings) }
+    }
+
+    fun toggleWrap() = updateSettings {
+        it.copy(wrapMode = if (it.wrapMode == WrapMode.WRAP) WrapMode.NO_WRAP else WrapMode.WRAP)
+    }
+
+    /** 字号档位步进（12/14/16/18/20/22/24），到端点不变 */
+    fun stepFontSize(delta: Int) = updateSettings {
+        val index = FONT_SIZE_STEPS.indexOf(it.fontSizeSp).coerceAtLeast(0)
+        it.copy(fontSizeSp = FONT_SIZE_STEPS[(index + delta).coerceIn(0, FONT_SIZE_STEPS.lastIndex)])
+    }
+
+    /** 行距档位循环：120→150→180→200 */
+    fun cycleLineHeight() = updateSettings {
+        val index = LINE_HEIGHT_STEPS.indexOf(it.lineHeightPercent)
+        it.copy(lineHeightPercent = LINE_HEIGHT_STEPS[(index + 1).mod(LINE_HEIGHT_STEPS.size)])
+    }
+
+    /** 字体循环：代码→衬线→无衬线（CUSTOM 导入在 M4） */
+    fun cycleFont() = updateSettings {
+        val order = listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
+        it.copy(font = order[(order.indexOf(it.font) + 1).mod(order.size)])
+    }
+
+    /** 主题循环：跟随系统→默认白→护眼绿→柔光米黄→夜间黑 */
+    fun cycleTheme() = updateSettings {
+        val order = listOf(null, ReadingTheme.DEFAULT, ReadingTheme.EYE_CARE,
+            ReadingTheme.SOFT_LIGHT, ReadingTheme.NIGHT)
+        it.copy(theme = order[(order.indexOf(it.theme) + 1).mod(order.size)])
+    }
+
+    companion object {
+        val FONT_SIZE_STEPS = listOf(12, 14, 16, 18, 20, 22, 24)
+        val LINE_HEIGHT_STEPS = listOf(120, 150, 180, 200)
+    }
+}
