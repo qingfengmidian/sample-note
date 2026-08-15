@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
  */
 class PlainTextParser internal constructor(
     val format: DocFormat,
-    private val probe: CharsetProbe = IcuCharsetProbe
+    private val probe: CharsetProbe = StrictUtf8Probe
 ) : DocumentParser {
 
     init {

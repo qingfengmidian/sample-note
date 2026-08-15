@@ -18,29 +18,26 @@ internal fun interface CharsetProbe {
 }
 
 /**
- * 平台 ICU 探测；置信度 < 50 视为探测失败。
- * 注：android.icu.text.CharsetDetector 不在公开 SDK（android.jar）中，但真机 boot classpath
- * 与 Robolectric android-all 均含该类，故经反射调用；任何失败（hidden API 拦截等）
- * 一律视为探测失败返回 null，走 GBK → Latin-1 回退。
+ * 严格解码级联探测：能严格按 UTF-8 解码则判 UTF-8，否则返回 null（交由 GBK → Latin-1 回退）。
+ * 原设计的 android.icu.text.CharsetDetector 非公开 SDK 类，真机 hidden API 策略拦截反射调用
+ * （M3 真机验证发现：UTF-8 无 BOM 文件被误判为 Latin-1 乱码），故改为确定性级联。
  */
-internal object IcuCharsetProbe : CharsetProbe {
-    private const val MIN_CONFIDENCE = 50
-
-    override fun detect(head: ByteArray): String? = runCatching {
-        val detectorClass = Class.forName("android.icu.text.CharsetDetector")
-        val detector = detectorClass.getDeclaredConstructor().newInstance()
-        detectorClass.getMethod("setText", ByteArray::class.java).invoke(detector, head)
-        val match = detectorClass.getMethod("detect").invoke(detector) ?: return null
-        val confidence = match.javaClass.getMethod("getConfidence").invoke(match) as Int
-        if (confidence >= MIN_CONFIDENCE) match.javaClass.getMethod("getName").invoke(match) as String else null
-    }.getOrNull()
+internal object StrictUtf8Probe : CharsetProbe {
+    override fun detect(head: ByteArray): String? {
+        // 尾部最多 3 字节可能是不完整的多字节字符（8KB 截断），逐一回退重试
+        for (cut in 0..3) {
+            val candidate = if (cut == 0) head else head.copyOf(head.size - cut)
+            if (TextDecoding.decodableStrictly(candidate, Charsets.UTF_8)) return "UTF-8"
+        }
+        return null
+    }
 }
 
 /** txt/md/xml 共用的文本解码逻辑：编码探测 + BOM 剥离 + 按行分段 */
 internal object TextDecoding {
     private const val HEAD_BYTES = 8 * 1024
 
-    /** 探测顺序：① BOM 判定 UTF-8/UTF-16LE/BE；② 前 8KB 走 ICU 探测；③ 回退 GBK → Latin-1 */
+    /** 探测顺序：① BOM 判定 UTF-8/UTF-16LE/BE；② 前 8KB 严格 UTF-8 判定；③ 回退 GBK → Latin-1 */
     fun detectCharset(bytes: ByteArray, probe: CharsetProbe): Charset {
         // ① BOM
         if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte())
@@ -48,7 +45,7 @@ internal object TextDecoding {
         if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) return Charsets.UTF_16LE
         if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) return Charsets.UTF_16BE
 
-        // ② 平台 ICU 探测（无 BOM 时）
+        // ② 探测（默认严格 UTF-8 判定，可替换）
         val head = bytes.copyOfRange(0, minOf(HEAD_BYTES, bytes.size))
         probe.detect(head)?.let { name ->
             runCatching { charset(name) }.getOrNull()?.let { return it }
@@ -83,7 +80,7 @@ internal object TextDecoding {
     }
 
     /** 严格模式校验能否无损解码（REPORT 遇错即失败） */
-    private fun decodableStrictly(bytes: ByteArray, charset: Charset): Boolean = try {
+    internal fun decodableStrictly(bytes: ByteArray, charset: Charset): Boolean = try {
         charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
@@ -96,7 +93,7 @@ internal object TextDecoding {
 
 /** TXT 解析器：编码探测后按行分段，输出单章 Document */
 class TxtParser internal constructor(
-    private val probe: CharsetProbe = IcuCharsetProbe
+    private val probe: CharsetProbe = StrictUtf8Probe
 ) : DocumentParser {
 
     override suspend fun parse(uri: Uri, resolver: ContentResolver): Document {
