@@ -73,4 +73,14 @@ class SettingsRepositoryTest {
         repo.save(ReadingSettings(theme = null))
         assertNull(repo.settings.first().theme)
     }
+
+    @Test
+    fun customFontPath_roundtrip() = runTest {
+        val repo = newRepository(this)
+        repo.save(ReadingSettings(font = ReaderFont.CUSTOM, customFontPath = "/data/files/fonts/x.ttf"))
+        assertEquals("/data/files/fonts/x.ttf", repo.settings.first().customFontPath)
+        // 清除自定义字体路径（切回内置字体）后键应被移除
+        repo.save(ReadingSettings(font = ReaderFont.CODE, customFontPath = null))
+        assertNull(repo.settings.first().customFontPath)
+    }
 }

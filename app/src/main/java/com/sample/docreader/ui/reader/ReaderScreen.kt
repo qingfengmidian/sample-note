@@ -41,7 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.sample.docreader.core.io.AssetsFileOpener
+import com.sample.docreader.core.io.DelegatingFileOpener
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
@@ -49,16 +49,16 @@ import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
 import com.sample.docreader.core.settings.SettingsRepository
 
-/** 阅读界面（设计§4）：顶部栏（文件名/菜单）+ 正文区 + 底部工具条。M3 入口为 fixtures 桩，SAF 入口在 M4。 */
+/** 阅读界面（设计§4）：顶部栏（文件名/菜单）+ 正文区 + 底部工具条。uri 为 SAF content:// 或 asset:/// 桩。 */
 @Composable
-fun ReaderScreen(name: String, onBack: () -> Unit) {
+fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit) {
     val context = LocalContext.current
     val viewModel: ReaderViewModel = viewModel(factory = viewModelFactory {
-        initializer { ReaderViewModel(AssetsFileOpener(context.assets), SettingsRepository(context)) }
+        initializer { ReaderViewModel(DelegatingFileOpener(context), SettingsRepository(context)) }
     })
-    LaunchedEffect(name) {
+    LaunchedEffect(uri) {
         if (viewModel.uiState.value.document == null) {
-            viewModel.load("asset:///fixtures/$name", formatOfName(name))
+            viewModel.load(uri, format)
         }
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -71,13 +71,6 @@ fun ReaderScreen(name: String, onBack: () -> Unit) {
         onCycleFont = viewModel::cycleFont,
         onCycleTheme = viewModel::cycleTheme
     )
-}
-
-/** 按扩展名判定格式；M3 入口仅 txt/md/xml */
-internal fun formatOfName(name: String): DocFormat = when (name.substringAfterLast('.', "")) {
-    "md" -> DocFormat.MD
-    "xml" -> DocFormat.XML
-    else -> DocFormat.TXT
 }
 
 /**

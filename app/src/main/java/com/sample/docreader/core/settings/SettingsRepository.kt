@@ -35,6 +35,7 @@ class SettingsRepository(
         val FONT = stringPreferencesKey("font")
         val THEME = stringPreferencesKey("theme") // 缺省/空 = 跟随系统
         val AUTO_SAVE = booleanPreferencesKey("auto_save")
+        val CUSTOM_FONT_PATH = stringPreferencesKey("custom_font_path")
     }
 
     val settings: Flow<ReadingSettings> = dataStore.data.map { p ->
@@ -46,7 +47,8 @@ class SettingsRepository(
             font = p[Keys.FONT]?.let { runCatching { ReaderFont.valueOf(it) }.getOrNull() }
                 ?: ReaderFont.CODE,
             theme = p[Keys.THEME]?.let { runCatching { ReadingTheme.valueOf(it) }.getOrNull() },
-            autoSave = p[Keys.AUTO_SAVE] ?: false
+            autoSave = p[Keys.AUTO_SAVE] ?: false,
+            customFontPath = p[Keys.CUSTOM_FONT_PATH]
         )
     }
 
@@ -59,6 +61,8 @@ class SettingsRepository(
             val themeKey = Keys.THEME
             if (settings.theme == null) p.remove(themeKey) else p[themeKey] = settings.theme.name
             p[Keys.AUTO_SAVE] = settings.autoSave
+            if (settings.customFontPath == null) p.remove(Keys.CUSTOM_FONT_PATH)
+            else p[Keys.CUSTOM_FONT_PATH] = settings.customFontPath
         }
     }
 }

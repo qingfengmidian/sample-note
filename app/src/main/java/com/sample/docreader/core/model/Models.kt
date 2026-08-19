@@ -42,7 +42,8 @@ data class ReadingSettings(
     val wrapMode: WrapMode = WrapMode.WRAP,
     val font: ReaderFont = ReaderFont.CODE, // 默认代码风格，与需求 F2.4 一致
     val theme: ReadingTheme? = null,    // null = 跟随系统深浅色（浅色→DEFAULT，深色→NIGHT）
-    val autoSave: Boolean = false       // md/txt 自动保存开关（F3.4），默认关闭
+    val autoSave: Boolean = false,      // md/txt 自动保存开关（F3.4），默认关闭
+    val customFontPath: String? = null  // CUSTOM 字体经 SAF 导入后复制到 files/fonts/ 的绝对路径（M4）
 )
 
 /** 解析层受控异常，UI 按类型给出差异化提示（需求"稳定性"条目） */

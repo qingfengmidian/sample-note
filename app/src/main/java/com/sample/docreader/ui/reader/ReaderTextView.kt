@@ -14,14 +14,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.io.File
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
@@ -40,11 +43,26 @@ val ReaderFontFamilyKey = SemanticsPropertyKey<FontFamily>("ReaderFontFamily")
 fun resolveReadingTheme(theme: ReadingTheme?): ReadingTheme =
     theme ?: if (isSystemInDarkTheme()) ReadingTheme.NIGHT else ReadingTheme.DEFAULT
 
-/** 字体映射：CUSTOM 的字体文件导入在 M4 实现，本里程碑无文件时回退 Monospace */
+/** 字体映射：CUSTOM 无字体文件时回退 Monospace（TC-UI-03 断言仍以此为准） */
 fun fontFamilyOf(font: ReaderFont): FontFamily = when (font) {
     ReaderFont.CODE, ReaderFont.CUSTOM -> FontFamily.Monospace
     ReaderFont.SERIF -> FontFamily.Serif
     ReaderFont.SANS -> FontFamily.SansSerif
+}
+
+/**
+ * CUSTOM 字体解析：customFontPath 有效时加载用户经 SAF 导入的 ttf/otf；
+ * 加载失败或缺省回退 Monospace。非 CUSTOM 字体直接走 [fontFamilyOf]。
+ */
+@Composable
+fun fontFamilyFor(font: ReaderFont, customFontPath: String?): FontFamily {
+    val custom = remember(font, customFontPath) {
+        if (font != ReaderFont.CUSTOM) return@remember null
+        val path = customFontPath
+        if (path.isNullOrBlank()) null
+        else runCatching { FontFamily(Font(File(path))) }.getOrNull()
+    }
+    return custom ?: fontFamilyOf(font)
 }
 
 /** 行距公式：lineHeight = fontSizeSp * lineHeightPercent / 100（设计§3.3） */
@@ -69,7 +87,7 @@ fun ReaderTextView(
         color = theme.foreground,
         fontSize = settings.fontSizeSp.sp,
         lineHeight = lineHeightSp(settings),
-        fontFamily = fontFamilyOf(settings.font)
+        fontFamily = fontFamilyFor(settings.font, settings.customFontPath)
     )
     SelectionContainer {
         LazyColumn(

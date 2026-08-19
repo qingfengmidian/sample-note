@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.FileNotFoundException
 
 /** 阅读界面状态（设计§3.3：ReaderViewModel 向 UI 暴露单个 StateFlow） */
 data class ReaderUiState(
@@ -61,6 +62,16 @@ class ReaderViewModel(
                 _uiState.update { it.copy(loading = false, error = e.message) }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: FileNotFoundException) {
+                // 云盘 Provider 进程被系统/OEM 杀死时（S1 探针结论）访问会抛
+                // "No content provider ..."，不得误判权限失效；提示用户启动对应应用。
+                if ((e.message ?: "").contains("No content provider")) {
+                    _uiState.update {
+                        it.copy(loading = false, error = "文件提供方（如云盘应用）未运行，请启动对应应用后重试")
+                    }
+                } else {
+                    _uiState.update { it.copy(loading = false, error = ParseException.NoPermission().message) }
+                }
             } catch (e: Exception) {
                 // 文件读不到（被移动/删除等）统一按无权限提示
                 _uiState.update { it.copy(loading = false, error = ParseException.NoPermission().message) }
