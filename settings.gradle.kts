@@ -14,3 +14,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "docreader"
 include(":app")
+// S1 SAF 探针（spike，仅 debug，不入 release）
+include(":spike:saf-probe")
