@@ -46,7 +46,8 @@ class MainActivity : ComponentActivity() {
                         val format = entry.arguments?.getString("format")
                             ?.let { runCatching { DocFormat.valueOf(it) }.getOrNull() }
                             ?: DocFormat.TXT
-                        val uri = Uri.decode(entry.arguments?.getString("uri").orEmpty())
+                        // Navigation 已对路径参数解码一次，这里不能再 Uri.decode，否则会二次解码损坏 content:// URI
+                        val uri = entry.arguments?.getString("uri").orEmpty()
                         ReaderScreen(
                             uri = uri,
                             format = format,
