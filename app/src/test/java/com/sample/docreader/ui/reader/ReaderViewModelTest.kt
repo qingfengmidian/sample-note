@@ -94,6 +94,15 @@ class ReaderViewModelTest {
         assertTrue(s.document!!.chapters[0].paragraphs.size > 5)
     }
 
+    /** TC-F1-09：显示名经路由传入后应优先于 URI 末段（避免 content:// 的百分号编码段当标题） */
+    @Test
+    fun load_prefersDisplayNameOverUriSegment() = runTest {
+        val (vm, _) = newViewModel(this)
+        vm.load("asset:///fixtures/sample_utf8.txt", DocFormat.TXT, displayName = "自定义名.txt")
+        awaitLoaded(vm)
+        assertEquals("自定义名.txt", vm.uiState.value.document?.name)
+    }
+
     @Test
     fun load_md_usesPlainTextParser() = runTest {
         val (vm, _) = newViewModel(this)

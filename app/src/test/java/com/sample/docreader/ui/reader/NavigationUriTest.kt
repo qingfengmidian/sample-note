@@ -23,9 +23,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * 回归测试（TC-F1-09）：content:// URI 经导航路由 `reader/{format}/{Uri.encode(uri)}` 往返后，
- * Navigation 已对路径参数解码一次，`arguments.getString("uri")` 应直接等于原始 uri，
- * 不得再 Uri.decode（否则会二次解码损坏含 %3A/%2F 的 SAF document URI）。
+ * 回归测试（TC-F1-09）：content:// URI 与文件名经导航路由
+ * `reader/{format}/{Uri.encode(uri)}/{Uri.encode(name)}` 往返后，
+ * Navigation 已对路径参数解码一次，`arguments.getString(...)` 应直接等于原始值，
+ * 不得再 Uri.decode（否则会二次解码损坏含 %3A/%2F 的 SAF document URI 或特殊字符文件名）。
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -35,21 +36,26 @@ class NavigationUriTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun contentUri_argumentIsAlreadyDecoded() {
-        val original = "content://com.android.providers.downloads.documents/document/raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Fnote.md"
-        var raw by mutableStateOf("")
+    fun contentUri_andName_argumentsAreAlreadyDecoded() {
+        val originalUri = "content://com.android.providers.downloads.documents/document/raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Fnote.md"
+        val originalName = "note #1 & 副本.md"
+        var rawUri by mutableStateOf("")
+        var rawName by mutableStateOf("")
 
         composeRule.setContent {
             val nav = rememberNavController()
             NavHost(nav, startDestination = "home") {
                 composable("home") {
                     Button(onClick = {
-                        nav.navigate("reader/${DocFormat.MD.name}/${Uri.encode(original)}")
+                        nav.navigate(
+                            "reader/${DocFormat.MD.name}/${Uri.encode(originalUri)}/${Uri.encode(originalName)}"
+                        )
                     }) { Text("go") }
                 }
-                composable("reader/{format}/{uri}") { entry ->
+                composable("reader/{format}/{uri}/{name}") { entry ->
                     LaunchedEffect(Unit) {
-                        raw = entry.arguments?.getString("uri").orEmpty()
+                        rawUri = entry.arguments?.getString("uri").orEmpty()
+                        rawName = entry.arguments?.getString("name").orEmpty()
                     }
                     Text(entry.arguments?.getString("uri").orEmpty())
                 }
@@ -59,6 +65,7 @@ class NavigationUriTest {
         composeRule.onNodeWithText("go").performClick()
         composeRule.waitForIdle()
 
-        assertEquals(original, raw)
+        assertEquals(originalUri, rawUri)
+        assertEquals(originalName, rawName)
     }
 }

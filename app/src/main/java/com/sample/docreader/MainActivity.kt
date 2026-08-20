@@ -35,22 +35,26 @@ class MainActivity : ComponentActivity() {
                         HomeScreen(
                             onOpenSettings = { navController.navigate("settings") },
                             onOpenFixtures = { navController.navigate("fixtures") },
-                            onOpenReader = { uri, format ->
-                                navController.navigate("reader/${format.name}/${Uri.encode(uri)}")
+                            onOpenReader = { uri, name, format ->
+                                navController.navigate(
+                                    "reader/${format.name}/${Uri.encode(uri)}/${Uri.encode(name)}"
+                                )
                             },
                             pendingViewUri = viewUri,
                             onViewUriConsumed = { pendingViewUri.value = null }
                         )
                     }
-                    composable("reader/{format}/{uri}") { entry ->
+                    composable("reader/{format}/{uri}/{name}") { entry ->
                         val format = entry.arguments?.getString("format")
                             ?.let { runCatching { DocFormat.valueOf(it) }.getOrNull() }
                             ?: DocFormat.TXT
                         // Navigation 已对路径参数解码一次，这里不能再 Uri.decode，否则会二次解码损坏 content:// URI
                         val uri = entry.arguments?.getString("uri").orEmpty()
+                        val name = entry.arguments?.getString("name").orEmpty()
                         ReaderScreen(
                             uri = uri,
                             format = format,
+                            displayName = name,
                             onBack = { navController.popBackStack() }
                         )
                     }
@@ -66,7 +70,7 @@ class MainActivity : ComponentActivity() {
                                     else -> DocFormat.TXT
                                 }
                                 navController.navigate(
-                                    "reader/${format.name}/${Uri.encode("asset:///fixtures/$name")}"
+                                    "reader/${format.name}/${Uri.encode("asset:///fixtures/$name")}/${Uri.encode(name)}"
                                 )
                             },
                             onOpenSettings = { navController.navigate("settings") }

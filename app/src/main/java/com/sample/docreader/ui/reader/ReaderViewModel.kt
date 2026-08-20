@@ -59,12 +59,12 @@ class ReaderViewModel(
         }
     }
 
-    fun load(uri: String, format: DocFormat) {
+    fun load(uri: String, format: DocFormat, displayName: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
             try {
                 val bytes = fileOpener.open(uri).use { it.readBytes() }
-                val name = uri.substringAfterLast('/')
+                val name = displayName?.takeIf { it.isNotBlank() } ?: uri.substringAfterLast('/')
                 val document = parseBytes(bytes, name, uri, format)
                 currentUri = uri
                 val restored = progressRepository?.progress(uri)?.first()

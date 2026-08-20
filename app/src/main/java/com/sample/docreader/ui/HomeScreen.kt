@@ -52,7 +52,7 @@ import java.util.Locale
 fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenFixtures: () -> Unit,
-    onOpenReader: (uri: String, format: DocFormat) -> Unit,
+    onOpenReader: (uri: String, name: String, format: DocFormat) -> Unit,
     pendingViewUri: Uri? = null,
     onViewUriConsumed: () -> Unit = {}
 ) {
@@ -81,7 +81,7 @@ fun HomeScreen(
     }
     LaunchedEffect(state.openTarget) {
         state.openTarget?.let {
-            onOpenReader(it.uri, it.format)
+            onOpenReader(it.uri, it.name, it.format)
             viewModel.consumeOpenTarget()
         }
     }

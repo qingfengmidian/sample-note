@@ -62,7 +62,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** 阅读界面（设计§4）：顶部栏（书名/章节名）+ 正文区 + 底部工具条 + epub 章节列表/翻章。 */
 @Composable
-fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit) {
+fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit, displayName: String? = null) {
     val context = LocalContext.current
     val viewModel: ReaderViewModel = viewModel(factory = viewModelFactory {
         initializer {
@@ -75,7 +75,7 @@ fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit) {
     })
     LaunchedEffect(uri) {
         if (viewModel.uiState.value.document == null) {
-            viewModel.load(uri, format)
+            viewModel.load(uri, format, displayName)
         }
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()

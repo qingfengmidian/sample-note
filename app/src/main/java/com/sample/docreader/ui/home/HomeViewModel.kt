@@ -20,8 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.FileNotFoundException
 
-/** 阅读入口导航目标：uri 与已嗅探出的格式经路由传入 ReaderScreen */
-data class OpenTarget(val uri: String, val format: DocFormat)
+/** 阅读入口导航目标：uri、显示名与已嗅探出的格式经路由传入 ReaderScreen */
+data class OpenTarget(val uri: String, val name: String, val format: DocFormat)
 
 /** 首页状态（设计§4.1：最近列表 + 打开入口 + 一次性提示/导航事件） */
 data class HomeUiState(
@@ -66,7 +66,7 @@ class HomeViewModel(
                     val name = displayName ?: uri.lastPathSegment ?: "未命名"
                     recentRepository.touch(uri.toString(), name, format)
                     _uiState.update {
-                        it.copy(openTarget = OpenTarget(uri.toString(), format))
+                        it.copy(openTarget = OpenTarget(uri.toString(), name, format))
                     }
                 }
             } catch (e: UnsupportedFormatException) {
@@ -87,7 +87,7 @@ class HomeViewModel(
                     val uri = Uri.parse(item.uri)
                     resolver.openInputStream(uri)?.use { it.read() } ?: throw FileNotFoundException(item.uri)
                     recentRepository.touch(item.uri, item.name, item.format)
-                    _uiState.update { it.copy(openTarget = OpenTarget(item.uri, item.format)) }
+                    _uiState.update { it.copy(openTarget = OpenTarget(item.uri, item.name, item.format)) }
                 }
             } catch (e: SecurityException) {
                 // 持久权限已失效（文件被移动/删除/Provider 撤销授权）：移出列表并提示
