@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.sample.docreader.core.progress.ProgressDao
+import com.sample.docreader.core.progress.ProgressEntity
 import kotlinx.coroutines.flow.Flow
 
 /** 最近打开记录（设计§3.5：uri 主键，REPLACE 插入） */
@@ -40,10 +42,12 @@ interface RecentFileDao {
     suspend fun clear()
 }
 
-@Database(entities = [RecentFileEntity::class], version = 1, exportSchema = false)
+@Database(entities = [RecentFileEntity::class, ProgressEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun recentFileDao(): RecentFileDao
+
+    abstract fun progressDao(): ProgressDao
 
     companion object {
         @Volatile

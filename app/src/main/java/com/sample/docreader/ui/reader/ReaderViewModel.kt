@@ -10,14 +10,17 @@ import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
+import com.sample.docreader.core.parse.EpubParser
 import com.sample.docreader.core.parse.ParserFactory
 import com.sample.docreader.core.parse.PlainTextParser
 import com.sample.docreader.core.parse.TxtParser
+import com.sample.docreader.core.progress.ProgressRepository
 import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.FileNotFoundException
@@ -27,21 +30,27 @@ data class ReaderUiState(
     val loading: Boolean = true,
     val document: Document? = null,
     val settings: ReadingSettings = ReadingSettings(),
-    val error: String? = null       // ParseException 差异化文案
+    val error: String? = null,             // ParseException 差异化文案
+    val chapterIndex: Int = 0,             // 当前章节索引（epub 多章）
+    val restoreParagraph: Int? = null      // 加载/切章后待滚动到的段落索引（一次性）
 )
 
 /**
- * 阅读器 ViewModel：持有 Document + ReadingSettings。
- * 加载经 FileOpener 桩读字节 + ParserFactory 分发（txt→TxtParser，md/xml→PlainTextParser）；
- * epub 阅读为 M5，本里程碑视为不支持。
+ * 阅读器 ViewModel：持有 Document + 当前章节 + ReadingSettings。
+ * 加载经 FileOpener 读字节 + ParserFactory 分发（txt/md/xml 单章，epub 多章）；
+ * epub 阅读进度按 uri 经 ProgressRepository 恢复/保存（F2.8）。
  */
 class ReaderViewModel(
     private val fileOpener: FileOpener,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val progressRepository: ProgressRepository? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
+
+    private var currentUri: String = ""
+    private var currentParagraph: Int = 0
 
     init {
         // 全局设置变化即时反映到阅读界面
@@ -57,7 +66,19 @@ class ReaderViewModel(
                 val bytes = fileOpener.open(uri).use { it.readBytes() }
                 val name = uri.substringAfterLast('/')
                 val document = parseBytes(bytes, name, uri, format)
-                _uiState.update { it.copy(loading = false, document = document) }
+                currentUri = uri
+                val restored = progressRepository?.progress(uri)?.first()
+                val chapterIndex = restored?.chapter
+                    ?.coerceIn(0, (document.chapters.size - 1).coerceAtLeast(0)) ?: 0
+                currentParagraph = restored?.paragraph?.coerceAtLeast(0) ?: 0
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        document = document,
+                        chapterIndex = chapterIndex,
+                        restoreParagraph = currentParagraph
+                    )
+                }
             } catch (e: ParseException) {
                 _uiState.update { it.copy(loading = false, error = e.message) }
             } catch (e: CancellationException) {
@@ -83,8 +104,33 @@ class ReaderViewModel(
         when (val parser = ParserFactory.forFormat(format)) {
             is TxtParser -> parser.parseBytes(bytes, name, uri)
             is PlainTextParser -> parser.parseBytes(bytes, name, uri)
+            is EpubParser -> parser.parseBytes(bytes, name, uri)
             else -> throw ParseException.UnsupportedFormat()
         }
+
+    /** 跳转到指定章节（epub），越界忽略；切换后从章首开始并记录进度（F2.7） */
+    fun selectChapter(index: Int) {
+        val document = _uiState.value.document ?: return
+        if (index !in document.chapters.indices) return
+        currentParagraph = 0
+        _uiState.update { it.copy(chapterIndex = index, restoreParagraph = 0) }
+        persistProgress(index, 0)
+    }
+
+    /** UI 滚动时上报首个可见段落索引，用于阅读进度恢复（F2.8） */
+    fun onFirstVisibleParagraphChanged(paragraph: Int) {
+        currentParagraph = paragraph.coerceAtLeast(0)
+        persistProgress(_uiState.value.chapterIndex, currentParagraph)
+    }
+
+    /** UI 完成一次 restoreParagraph 滚动后调用，清除一次性目标 */
+    fun consumeRestoreParagraph() = _uiState.update { it.copy(restoreParagraph = null) }
+
+    private fun persistProgress(chapter: Int, paragraph: Int) {
+        val repo = progressRepository ?: return
+        if (currentUri.isEmpty()) return
+        viewModelScope.launch { repo.save(currentUri, chapter, paragraph) }
+    }
 
     /** 设置改动即时生效（先更新 StateFlow）并经 SettingsRepository 持久化（全局共享，F3.3） */
     fun updateSettings(transform: (ReadingSettings) -> ReadingSettings) {

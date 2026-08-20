@@ -1,11 +1,15 @@
 package com.sample.docreader.ui.reader
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
 import com.sample.docreader.core.io.FileOpener
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ParseException
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
+import com.sample.docreader.core.progress.ProgressRepository
+import com.sample.docreader.core.recent.AppDatabase
 import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -113,11 +117,35 @@ class ReaderViewModelTest {
     }
 
     @Test
-    fun load_epub_unsupportedInM3() = runTest {
+    fun load_epub_parsesChapters() = runTest {
         val (vm, _) = newViewModel(this)
         vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
         awaitLoaded(vm)
-        assertEquals(ParseException.UnsupportedFormat().message, vm.uiState.value.error)
+        val s = vm.uiState.value
+        assertNull(s.error)
+        assertEquals(DocFormat.EPUB, s.document?.format)
+        assertTrue((s.document?.chapters?.size ?: 0) >= 3)
+        assertEquals(0, s.chapterIndex)
+    }
+
+    /** TC-F2-18（VM 侧）：epub 重开恢复上次章节索引 */
+    @Test
+    fun load_epub_restoresChapterProgress() = runTest {
+        val db = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext(), AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val progress = ProgressRepository(db)
+        progress.save("asset:///fixtures/sample.epub", chapter = 1, paragraph = 5)
+
+        val store = PreferenceDataStoreFactory.create(
+            scope = backgroundScope,
+            produceFile = { tmpFolder.newFile("progress_${System.nanoTime()}.preferences_pb") }
+        )
+        val vm = ReaderViewModel(ResourceFileOpener(), SettingsRepository(store), progress)
+        vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+        assertEquals(1, vm.uiState.value.chapterIndex)
+        db.close()
     }
 
     /** TC-F2-24：0 字节空文件解析为全空段落，UI 据此显示空态提示 */

@@ -1,18 +1,24 @@
 package com.sample.docreader.ui.reader
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -31,6 +37,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -47,14 +54,23 @@ import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
+import com.sample.docreader.core.progress.ProgressRepository
+import com.sample.docreader.core.recent.AppDatabase
 import com.sample.docreader.core.settings.SettingsRepository
+import kotlinx.coroutines.flow.distinctUntilChanged
 
-/** 阅读界面（设计§4）：顶部栏（文件名/菜单）+ 正文区 + 底部工具条。uri 为 SAF content:// 或 asset:/// 桩。 */
+/** 阅读界面（设计§4）：顶部栏（书名/章节名）+ 正文区 + 底部工具条 + epub 章节列表/翻章。 */
 @Composable
 fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit) {
     val context = LocalContext.current
     val viewModel: ReaderViewModel = viewModel(factory = viewModelFactory {
-        initializer { ReaderViewModel(DelegatingFileOpener(context), SettingsRepository(context)) }
+        initializer {
+            ReaderViewModel(
+                DelegatingFileOpener(context),
+                SettingsRepository(context),
+                ProgressRepository(AppDatabase.get(context.applicationContext))
+            )
+        }
     })
     LaunchedEffect(uri) {
         if (viewModel.uiState.value.document == null) {
@@ -62,6 +78,7 @@ fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit) {
         }
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    BackHandler { onBack() }
     ReaderContent(
         state = state,
         onBack = onBack,
@@ -69,7 +86,12 @@ fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit) {
         onFontSizeStep = viewModel::stepFontSize,
         onCycleLineHeight = viewModel::cycleLineHeight,
         onCycleFont = viewModel::cycleFont,
-        onCycleTheme = viewModel::cycleTheme
+        onCycleTheme = viewModel::cycleTheme,
+        onSelectChapter = viewModel::selectChapter,
+        onPrevChapter = { viewModel.selectChapter(state.chapterIndex - 1) },
+        onNextChapter = { viewModel.selectChapter(state.chapterIndex + 1) },
+        onFirstVisibleParagraphChanged = viewModel::onFirstVisibleParagraphChanged,
+        onRestoreParagraphConsumed = viewModel::consumeRestoreParagraph
     )
 }
 
@@ -87,10 +109,19 @@ fun ReaderContent(
     onCycleLineHeight: () -> Unit,
     onCycleFont: () -> Unit,
     onCycleTheme: () -> Unit,
-    listState: LazyListState = rememberLazyListState()
+    listState: LazyListState = rememberLazyListState(),
+    onSelectChapter: ((Int) -> Unit)? = null,
+    onPrevChapter: (() -> Unit)? = null,
+    onNextChapter: (() -> Unit)? = null,
+    onFirstVisibleParagraphChanged: ((Int) -> Unit)? = null,
+    onRestoreParagraphConsumed: (() -> Unit)? = null
 ) {
     val settings = state.settings
     val theme = resolveReadingTheme(settings.theme)
+    val chapters = state.document?.chapters.orEmpty()
+    val chapter = chapters.getOrNull(state.chapterIndex)
+    val paragraphs = chapter?.paragraphs
+    val isEpub = state.document?.format == DocFormat.EPUB
 
     var pendingParagraph by remember { mutableIntStateOf(-1) }
     LaunchedEffect(settings.wrapMode) {
@@ -100,11 +131,33 @@ fun ReaderContent(
         }
     }
 
+    // 阅读进度：首个可见段落变化时上报（供 ProgressRepository 持久化，F2.8）
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { onFirstVisibleParagraphChanged?.invoke(it) }
+    }
+
+    // 加载恢复/切章后的一次性滚动目标
+    LaunchedEffect(state.restoreParagraph) {
+        state.restoreParagraph?.let { p ->
+            listState.scrollToItem(p)
+            onRestoreParagraphConsumed?.invoke()
+        }
+    }
+
+    var chapterSheetOpen by remember { mutableStateOf(false) }
+
     Scaffold(
         containerColor = theme.background,
         topBar = {
             TopAppBar(
-                title = { Text(state.document?.name ?: "", maxLines = 1) },
+                title = {
+                    Text(
+                        chapter?.title?.takeIf { it.isNotBlank() } ?: state.document?.name.orEmpty(),
+                        maxLines = 1
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -141,11 +194,14 @@ fun ReaderContent(
                 onFontSizeStep = onFontSizeStep,
                 onCycleLineHeight = onCycleLineHeight,
                 onCycleFont = onCycleFont,
-                onCycleTheme = onCycleTheme
+                onCycleTheme = onCycleTheme,
+                isEpub = isEpub,
+                onChapterList = if (isEpub) ({ chapterSheetOpen = true }) else null,
+                onPrevChapter = onPrevChapter,
+                onNextChapter = onNextChapter
             )
         }
     ) { padding ->
-        val paragraphs = state.document?.chapters?.firstOrNull()?.paragraphs
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
                 state.error != null -> Text(
@@ -165,9 +221,56 @@ fun ReaderContent(
             }
         }
     }
+
+    if (chapterSheetOpen) {
+        ChapterListSheet(
+            chapters = chapters,
+            currentIndex = state.chapterIndex,
+            onSelect = { index ->
+                chapterSheetOpen = false
+                onSelectChapter?.invoke(index)
+            },
+            onDismiss = { chapterSheetOpen = false }
+        )
+    }
 }
 
-/** 底部工具条：换行模式 / 字号 A- A+ / 行距 / 字体 / 阅读主题；按钮均带 contentDescription 且 ≥48dp */
+/** epub 章节列表弹层（F2.7）：按 Chapter.level 缩进展示嵌套层级，点击跳转 */
+@Composable
+private fun ChapterListSheet(
+    chapters: List<com.sample.docreader.core.model.Chapter>,
+    currentIndex: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("章节") },
+        text = {
+            LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
+                itemsIndexed(chapters, key = { index, _ -> index }) { index, chapter ->
+                    Text(
+                        chapter.title ?: "第 ${index + 1} 章",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(index) }
+                            .padding(
+                                start = ((chapter.level - 1) * 16).dp,
+                                end = 16.dp,
+                                top = 12.dp,
+                                bottom = 12.dp
+                            )
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
+}
+
+/** 底部工具条：换行模式 / 字号 A- A+ / 行距 / 字体 / 阅读主题；epub 追加章节列表与翻章。按钮均 ≥48dp */
 @Composable
 private fun ReaderToolbar(
     settings: ReadingSettings,
@@ -175,7 +278,11 @@ private fun ReaderToolbar(
     onFontSizeStep: (Int) -> Unit,
     onCycleLineHeight: () -> Unit,
     onCycleFont: () -> Unit,
-    onCycleTheme: () -> Unit
+    onCycleTheme: () -> Unit,
+    isEpub: Boolean = false,
+    onChapterList: (() -> Unit)? = null,
+    onPrevChapter: (() -> Unit)? = null,
+    onNextChapter: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -198,6 +305,17 @@ private fun ReaderToolbar(
         )
         ToolbarButton(text = fontLabel(settings.font), description = "切换字体", onClick = onCycleFont)
         ToolbarButton(text = themeLabel(settings.theme), description = "切换主题", onClick = onCycleTheme)
+        if (isEpub) {
+            if (onPrevChapter != null) {
+                ToolbarButton(text = "上一章", description = "上一章", onClick = onPrevChapter)
+            }
+            if (onChapterList != null) {
+                ToolbarButton(text = "章节", description = "章节列表", onClick = onChapterList)
+            }
+            if (onNextChapter != null) {
+                ToolbarButton(text = "下一章", description = "下一章", onClick = onNextChapter)
+            }
+        }
     }
 }
 

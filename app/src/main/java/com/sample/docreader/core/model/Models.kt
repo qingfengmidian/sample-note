@@ -15,7 +15,8 @@ data class Document(
 
 data class Chapter(
     val title: String?,          // 无标题可为 null
-    val paragraphs: List<String> // 段落级纯文本，渲染/编辑的基础单位
+    val paragraphs: List<String>,// 段落级纯文本，渲染/编辑的基础单位
+    val level: Int = 1           // 章节层级（1 起）：epub 目录嵌套用于章节列表缩进，单章格式恒为 1
 )
 
 enum class WrapMode { WRAP, NO_WRAP }

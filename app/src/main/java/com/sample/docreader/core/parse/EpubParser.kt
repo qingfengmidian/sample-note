@@ -53,8 +53,8 @@ class EpubParser : DocumentParser {
             val base = opfPath.substringBeforeLast('/', "")
             // 3. 目录：优先 nav.xhtml，回退 NCX
             val toc = parseToc(entries, opf, base)
-            val titleByPath = LinkedHashMap<String, String>() // 先出现的条目优先
-            for (t in toc) titleByPath.putIfAbsent(resolvePath(base, t.href), t.title)
+            val titleByPath = LinkedHashMap<String, TocEntry>() // 先出现的条目优先
+            for (t in toc) titleByPath.putIfAbsent(resolvePath(base, t.href), t)
 
             val chapters = ArrayList<Chapter>(opf.spine.size)
             opf.spine.forEachIndexed { index, idref ->
@@ -71,7 +71,12 @@ class EpubParser : DocumentParser {
                 } catch (e: Exception) {
                     throw ParseException.MalformedContent(e)
                 }
-                chapters += Chapter(titleByPath[path] ?: "第 ${index + 1} 章", paragraphs)
+                val tocEntry = titleByPath[path]
+                chapters += Chapter(
+                    title = tocEntry?.title ?: "第 ${index + 1} 章",
+                    paragraphs = paragraphs,
+                    level = tocEntry?.level ?: 1
+                )
             }
             Document(uri, name, DocFormat.EPUB, chapters)
         }
