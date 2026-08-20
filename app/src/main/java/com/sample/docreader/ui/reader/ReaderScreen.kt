@@ -56,6 +56,7 @@ import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
 import com.sample.docreader.core.progress.ProgressRepository
 import com.sample.docreader.core.recent.AppDatabase
+import com.sample.docreader.core.render.MarkdownParser
 import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -122,6 +123,11 @@ fun ReaderContent(
     val chapter = chapters.getOrNull(state.chapterIndex)
     val paragraphs = chapter?.paragraphs
     val isEpub = state.document?.format == DocFormat.EPUB
+    val isMd = state.document?.format == DocFormat.MD
+    var mdPreview by remember { mutableStateOf(false) }
+    val mdBlocks = remember(paragraphs, isMd) {
+        if (isMd) MarkdownParser.parse(paragraphs.orEmpty()) else emptyList()
+    }
 
     var pendingParagraph by remember { mutableIntStateOf(-1) }
     LaunchedEffect(settings.wrapMode) {
@@ -169,6 +175,15 @@ fun ReaderContent(
                         Icon(Icons.Default.MoreVert, contentDescription = "菜单")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (isMd) {
+                            DropdownMenuItem(
+                                text = { Text(if (mdPreview) "源码" else "预览") },
+                                onClick = {
+                                    menuOpen = false
+                                    mdPreview = !mdPreview
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("编辑（M7 里程碑）") },
                             onClick = {},
@@ -217,6 +232,7 @@ fun ReaderContent(
                     color = theme.foreground,
                     modifier = Modifier.align(Alignment.Center)
                 )
+                isMd && mdPreview -> MarkdownPreview(mdBlocks, settings, listState, theme)
                 else -> ReaderTextView(paragraphs, settings, listState)
             }
         }
