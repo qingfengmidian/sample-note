@@ -188,6 +188,40 @@ object FixtureGenerator {
             opf(chapters, ncx = false, nav = false),
             chapters.toMap())
 
+        // epub3 nav.xhtml 嵌套 <ol>（olDepth>1 → chapter.level>1）
+        epub(dir, "nested_nav.epub",
+            opf(chapters, ncx = false, nav = true),
+            buildMap {
+                putAll(chapters)
+                put("nav.xhtml", """
+                    |<?xml version="1.0" encoding="UTF-8"?>
+                    |<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+                    |<head><title>目录</title></head>
+                    |<body><nav epub:type="toc"><ol>
+                    |<li><a href="ch1.xhtml">第一部</a><ol>
+                    |<li><a href="ch2.xhtml">第二章</a><ol>
+                    |<li><a href="ch3.xhtml">第三节</a></li>
+                    |</ol></li>
+                    |</ol></li>
+                    |</ol></nav></body>
+                    |</html>
+                    |""".trimMargin())
+            })
+
+        // spine idref 不在 manifest 中（结构错误）→ 应抛 ParseException.MalformedContent
+        epub(dir, "bad_spine.epub",
+            opf = """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
+                |<metadata><dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/" id="id">fixture</dc:identifier>
+                |<dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">fixture</dc:title>
+                |<dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">zh</dc:language></metadata>
+                |<manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest>
+                |<spine><itemref idref="ghost"/></spine>
+                |</package>
+                |""".trimMargin(),
+            files = mapOf("ch1.xhtml" to xhtml("孤立章", "<p>内容。</p>")))
+
         // M2 追加（TC-UT-06a）：OPF 的 manifest/spine 引用 ch1.xhtml，但 zip 中并不存在该条目
         // → 结构错误且无任何字节可供降级，应抛 ParseException.MalformedContent
         epub(dir, "malformed.epub",
@@ -348,7 +382,7 @@ object FixtureGenerator {
 
         listOf("sample.epub", "sample3.epub", "hybrid.epub", "many_chapters.epub",
             "nested_toc.epub", "mixed_encoding.epub", "bad_decl.epub", "broken.epub", "no_nav.epub",
-            "malformed.epub")
+            "malformed.epub", "nested_nav.epub", "bad_spine.epub")
             .forEach { name ->
                 val e = entries(name)
                 check(e["mimetype"]?.toString(Charsets.US_ASCII) == "application/epub+zip",
@@ -393,6 +427,16 @@ object FixtureGenerator {
         check(malformed["OEBPS/content.opf"]?.toString(Charsets.UTF_8)?.contains("ch1.xhtml") == true
             && !malformed.containsKey("OEBPS/ch1.xhtml"),
             "malformed.epub 的 manifest/spine 应引用 zip 中不存在的 ch1.xhtml")
+
+        // nav.xhtml 嵌套 <ol>：至少 3 层 <ol> 开标签
+        val nestedNav = entries("nested_nav.epub")["OEBPS/nav.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(Regex("<ol>").findAll(nestedNav).count() >= 3,
+            "nested_nav.epub 的 nav.xhtml 应含 ≥3 层嵌套 <ol>")
+
+        // spine 引用 manifest 中不存在的 id
+        val badSpine = entries("bad_spine.epub")["OEBPS/content.opf"]?.toString(Charsets.UTF_8) ?: ""
+        check(badSpine.contains("""idref="ghost"""") && !badSpine.contains("""id="ghost""""),
+            "bad_spine.epub 的 spine 应引用 manifest 中不存在的 idref=ghost")
     }
 }
 

@@ -52,4 +52,20 @@ class ProgressRepositoryTest {
         assertEquals(5, p?.chapter)
         assertEquals(99, p?.paragraph)
     }
+
+    /** TC-UT-11：多本书进度按 uri 隔离——各自存取互不影响，覆盖一本不影响其他 */
+    @Test
+    fun save_multipleUris_isolated() = runTest {
+        repo.save("book-a", chapter = 1, paragraph = 10)
+        repo.save("book-b", chapter = 2, paragraph = 20)
+        repo.save("book-a", chapter = 3, paragraph = 30) // 覆盖 a，不应影响 b
+
+        val a = repo.progress("book-a").first()
+        val b = repo.progress("book-b").first()
+        assertEquals(3, a?.chapter)
+        assertEquals(30, a?.paragraph)
+        assertEquals(2, b?.chapter)
+        assertEquals(20, b?.paragraph)
+        assertNull("未保存过的 uri 应无进度", repo.progress("book-c").first())
+    }
 }

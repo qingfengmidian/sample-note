@@ -66,6 +66,21 @@ class ReaderViewModelTest {
         return ReaderViewModel(ResourceFileOpener(), repo) to repo
     }
 
+    /** 带进度仓库的 ViewModel（内存 Room）；用完需 close db */
+    private fun newViewModelWithProgress(
+        scope: TestScope
+    ): Triple<ReaderViewModel, ProgressRepository, AppDatabase> {
+        val db = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext(), AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val progress = ProgressRepository(db)
+        val store = PreferenceDataStoreFactory.create(
+            scope = scope.backgroundScope,
+            produceFile = { tmpFolder.newFile("progress_${System.nanoTime()}.preferences_pb") }
+        )
+        return Triple(ReaderViewModel(ResourceFileOpener(), SettingsRepository(store), progress), progress, db)
+    }
+
     /**
      * 等待 load 完成：TxtParser/PlainTextParser 内部 withContext(Dispatchers.IO) 走真实线程，
      * 测试调度器的 advanceUntilIdle 覆盖不到，需轮询等待加载结束再推进调度器。
@@ -137,23 +152,125 @@ class ReaderViewModelTest {
         assertEquals(0, s.chapterIndex)
     }
 
-    /** TC-F2-18（VM 侧）：epub 重开恢复上次章节索引 */
+    /**
+     * 等待进度落库：persistProgress 经 viewModelScope 异步写 Room，轮询直至读到预期值。
+     * expected 为 null 时只推进调度器（用于断言"未写入"的场景）。
+     */
+    private fun TestScope.awaitProgress(
+        progress: ProgressRepository, uri: String, chapter: Int, paragraph: Int
+    ) {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (true) {
+            advanceUntilIdle()
+            val saved = kotlinx.coroutines.runBlocking { progress.progress(uri).first() }
+            if (saved != null && saved.chapter == chapter && saved.paragraph == paragraph) return
+            check(System.currentTimeMillis() < deadline) { "进度持久化超时" }
+            Thread.sleep(20)
+        }
+    }
+
+    /** TC-F2-18（VM 侧）：epub 重开恢复上次章节索引；段落越界时 clamp 到该章末尾 */
     @Test
     fun load_epub_restoresChapterProgress() = runTest {
-        val db = Room.inMemoryDatabaseBuilder(
-            ApplicationProvider.getApplicationContext(), AppDatabase::class.java
-        ).allowMainThreadQueries().build()
-        val progress = ProgressRepository(db)
-        progress.save("asset:///fixtures/sample.epub", chapter = 1, paragraph = 5)
+        val (vm, _, db) = newViewModelWithProgress(this)
+        // sample.epub 第 2 章实际段落数 < 6，paragraph=5 应被 clamp 到 lastIndex
+        ProgressRepository(db).save("asset:///fixtures/sample.epub", chapter = 1, paragraph = 5)
 
-        val store = PreferenceDataStoreFactory.create(
-            scope = backgroundScope,
-            produceFile = { tmpFolder.newFile("progress_${System.nanoTime()}.preferences_pb") }
-        )
-        val vm = ReaderViewModel(ResourceFileOpener(), SettingsRepository(store), progress)
         vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
         awaitLoaded(vm)
-        assertEquals(1, vm.uiState.value.chapterIndex)
+        val s = vm.uiState.value
+        assertEquals(1, s.chapterIndex)
+        assertEquals(s.document!!.chapters[1].paragraphs.lastIndex, s.restoreParagraph)
+        db.close()
+    }
+
+    /** TC-F2-18：chapter 越界上界 clamp 到末章 */
+    @Test
+    fun load_epub_chapterBeyondLast_clampedToLastChapter() = runTest {
+        val (vm, _, db) = newViewModelWithProgress(this)
+        ProgressRepository(db).save("asset:///fixtures/sample.epub", chapter = 99, paragraph = 2)
+
+        vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+        val s = vm.uiState.value
+        val lastChapter = s.document!!.chapters.lastIndex
+        assertEquals(lastChapter, s.chapterIndex)
+        assertEquals(2.coerceAtMost(s.document.chapters[lastChapter].paragraphs.lastIndex), s.restoreParagraph)
+        db.close()
+    }
+
+    /** TC-F2-18：负值 chapter/paragraph clamp 到 0 */
+    @Test
+    fun load_epub_negativeProgress_clampedToZero() = runTest {
+        val (vm, _, db) = newViewModelWithProgress(this)
+        ProgressRepository(db).save("asset:///fixtures/sample.epub", chapter = -1, paragraph = -3)
+
+        vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+        val s = vm.uiState.value
+        assertEquals(0, s.chapterIndex)
+        assertEquals(0, s.restoreParagraph)
+        db.close()
+    }
+
+    /** TC-F2-18：selectChapter 越界（-1 与 size）被忽略，状态不变 */
+    @Test
+    fun selectChapter_outOfRange_ignored() = runTest {
+        val (vm, _, db) = newViewModelWithProgress(this)
+        vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+        val before = vm.uiState.value
+
+        vm.selectChapter(-1)
+        vm.selectChapter(before.document!!.chapters.size)
+        advanceUntilIdle()
+
+        val after = vm.uiState.value
+        assertEquals(before.chapterIndex, after.chapterIndex)
+        assertEquals(before.restoreParagraph, after.restoreParagraph)
+        db.close()
+    }
+
+    /** TC-F2-18：selectChapter 合法跳转 → chapterIndex 更新、restoreParagraph=0 且进度落库 */
+    @Test
+    fun selectChapter_valid_jumpAndPersist() = runTest {
+        val (vm, progress, db) = newViewModelWithProgress(this)
+        vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+
+        vm.selectChapter(2)
+        advanceUntilIdle()
+        val s = vm.uiState.value
+        assertEquals(2, s.chapterIndex)
+        assertEquals(0, s.restoreParagraph)
+        awaitProgress(progress, "asset:///fixtures/sample.epub", chapter = 2, paragraph = 0)
+        db.close()
+    }
+
+    /** TC-F2-18：onFirstVisibleParagraphChanged 负数 clamp 为 0 并落库 */
+    @Test
+    fun onFirstVisibleParagraphChanged_negative_clampedAndPersisted() = runTest {
+        val (vm, progress, db) = newViewModelWithProgress(this)
+        vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+
+        vm.onFirstVisibleParagraphChanged(-5)
+        awaitProgress(progress, "asset:///fixtures/sample.epub", chapter = 0, paragraph = 0)
+        db.close()
+    }
+
+    /** TC-F2-18：未加载任何文件（currentUri 为空）时 persistProgress 不写入 */
+    @Test
+    fun persistProgress_withoutLoad_nothingSaved() = runTest {
+        val (vm, progress, db) = newViewModelWithProgress(this)
+        advanceUntilIdle()
+
+        vm.onFirstVisibleParagraphChanged(3)
+        advanceUntilIdle()
+
+        assertNull(kotlinx.coroutines.runBlocking {
+            progress.progress("asset:///fixtures/sample.epub").first()
+        })
         db.close()
     }
 

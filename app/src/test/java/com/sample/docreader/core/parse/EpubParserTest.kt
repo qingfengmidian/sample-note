@@ -120,6 +120,38 @@ class EpubParserTest {
         assertFalse("提示文案不应含 \"null\" 字样：$msg", msg.contains("null"))
     }
 
+    /** TC-UT-04a 补充：nav.xhtml 嵌套 <ol>（olDepth>1）→ toc 与 chapter.level 反映嵌套层级 */
+    @Test
+    fun tcUt04a_nestedNavOlDepth() = runBlocking {
+        val toc = parser.tocEntries(Fixtures.bytes("nested_nav.epub"))
+        assertEquals(listOf("第一部", "第二章", "第三节"), toc.map { it.title })
+        assertEquals("嵌套 <ol> 深度即层级", listOf(1, 2, 3), toc.map { it.level })
+
+        val doc = parser.parseBytes(Fixtures.bytes("nested_nav.epub"), "nested_nav.epub")
+        assertEquals(listOf("第一部", "第二章", "第三节"), doc.chapters.map { it.title })
+        assertEquals(listOf(1, 2, 3), doc.chapters.map { it.level })
+    }
+
+    /** TC-UT-04a 补充：多个 toc 条目指向同一 href → putIfAbsent 先出现者优先（nested_toc 第一/二级同指 ch1） */
+    @Test
+    fun tcUt04a_sameHref_firstEntryWins() = runBlocking {
+        val doc = parser.parseBytes(Fixtures.bytes("nested_toc.epub"), "nested_toc.epub")
+        // ch1：第一级（lv1）先于第二级（lv2）；ch2 首现于第三级；ch3 首现于第四级
+        assertEquals(listOf("第一级", "第三级", "第四级"), doc.chapters.map { it.title })
+        assertEquals(listOf(1, 3, 4), doc.chapters.map { it.level })
+    }
+
+    /** TC-UT-06a 补充：spine idref 不在 manifest（bad_spine.epub）→ ParseException.MalformedContent */
+    @Test
+    fun tcUt06a_spineIdrefNotInManifest() = runBlocking {
+        try {
+            parser.parseBytes(Fixtures.bytes("bad_spine.epub"), "bad_spine.epub")
+            fail("应抛出 ParseException.MalformedContent")
+        } catch (e: ParseException.MalformedContent) {
+            // 预期
+        }
+    }
+
     /** TC-UT-06b：XmlPullParserException → 触发剥标签降级，产出可读文本 */
     @Test
     fun tcUt06b_tagStripFallback() {

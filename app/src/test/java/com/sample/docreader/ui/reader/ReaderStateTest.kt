@@ -49,6 +49,15 @@ class ReaderStateTest {
         composeRule.onNodeWithText("文件为空").assertIsDisplayed()
     }
 
+    /** 空 spine epub（0 章）显示空态提示而非永久转圈（M5 评审修复） */
+    @Test
+    fun emptyChapters_showsEmptyHint() {
+        val document = Document("asset:///fixtures/empty_spine.epub", "empty_spine.epub", DocFormat.EPUB,
+            emptyList())
+        setContent(ReaderUiState(loading = false, document = document))
+        composeRule.onNodeWithText("文件为空").assertIsDisplayed()
+    }
+
     @Test
     fun errorState_showsDifferentialMessage() {
         setContent(ReaderUiState(loading = false, error = "epub 缺少 OPF 描述文件，无法解析"))
