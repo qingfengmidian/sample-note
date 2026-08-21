@@ -70,7 +70,10 @@ class ReaderViewModel(
                 val restored = progressRepository?.progress(uri)?.first()
                 val chapterIndex = restored?.chapter
                     ?.coerceIn(0, (document.chapters.size - 1).coerceAtLeast(0)) ?: 0
-                currentParagraph = restored?.paragraph?.coerceAtLeast(0) ?: 0
+                // paragraph 同样需 clamp 到目标章节范围内，防止恢复越界（章节空时归 0）
+                val maxParagraph =
+                    (document.chapters.getOrNull(chapterIndex)?.paragraphs?.lastIndex ?: 0).coerceAtLeast(0)
+                currentParagraph = restored?.paragraph?.coerceIn(0, maxParagraph) ?: 0
                 _uiState.update {
                     it.copy(
                         loading = false,

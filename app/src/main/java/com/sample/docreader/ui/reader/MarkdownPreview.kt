@@ -72,7 +72,7 @@ fun MarkdownPreview(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            if (block.ordered) "1. " else "• ",
+                            if (block.ordered) "${block.number}. " else "• ",
                             style = base,
                             modifier = Modifier.width(24.dp)
                         )

@@ -8,7 +8,7 @@ package com.sample.docreader.core.render
 sealed class MarkdownBlock {
     data class Heading(val level: Int, val inlines: List<MdInline>) : MarkdownBlock()
     data class Paragraph(val inlines: List<MdInline>) : MarkdownBlock()
-    data class ListItem(val inlines: List<MdInline>, val ordered: Boolean) : MarkdownBlock()
+    data class ListItem(val inlines: List<MdInline>, val ordered: Boolean, val number: Int? = null) : MarkdownBlock()
     data class Quote(val inlines: List<MdInline>) : MarkdownBlock()
     data class CodeBlock(val language: String, val code: String) : MarkdownBlock()
 }
@@ -68,7 +68,8 @@ object MarkdownParser {
             return MarkdownBlock.ListItem(parseInline(m.groupValues[1].trim()), ordered = false)
         }
         ORDERED.matchEntire(line)?.let { m ->
-            return MarkdownBlock.ListItem(parseInline(m.groupValues[2].trim()), ordered = true)
+            return MarkdownBlock.ListItem(parseInline(m.groupValues[2].trim()), ordered = true,
+                number = m.groupValues[1].toInt())
         }
         return MarkdownBlock.Paragraph(parseInline(line.trim()))
     }

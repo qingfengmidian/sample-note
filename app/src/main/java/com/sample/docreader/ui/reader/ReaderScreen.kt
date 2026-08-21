@@ -25,6 +25,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,13 +37,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -124,7 +129,8 @@ fun ReaderContent(
     val paragraphs = chapter?.paragraphs
     val isEpub = state.document?.format == DocFormat.EPUB
     val isMd = state.document?.format == DocFormat.MD
-    var mdPreview by remember { mutableStateOf(false) }
+    // rememberSaveable：旋转/重建后不丢预览状态
+    var mdPreview by rememberSaveable { mutableStateOf(false) }
     val mdBlocks = remember(paragraphs, isMd) {
         if (isMd) MarkdownParser.parse(paragraphs.orEmpty()) else emptyList()
     }
@@ -137,8 +143,10 @@ fun ReaderContent(
         }
     }
 
-    // 阅读进度：首个可见段落变化时上报（供 ProgressRepository 持久化，F2.8）
-    LaunchedEffect(listState) {
+    // 阅读进度：首个可见段落变化时上报（供 ProgressRepository 持久化，F2.8）。
+    // md 预览模式下 item 是 Markdown 块而非段落，索引与段落进度不同义，不上报（否则污染源码视图进度）。
+    LaunchedEffect(listState, mdPreview) {
+        if (mdPreview) return@LaunchedEffect
         snapshotFlow { listState.firstVisibleItemIndex }
             .distinctUntilChanged()
             .collect { onFirstVisibleParagraphChanged?.invoke(it) }
@@ -224,10 +232,11 @@ fun ReaderContent(
                     color = theme.foreground,
                     modifier = Modifier.align(Alignment.Center)
                 )
-                state.loading || paragraphs == null ->
+                // 加载中：document 为 null 且无错误（避免 0 章 epub 误判为加载中而永久转圈）
+                state.loading || state.document == null ->
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                // TC-F2-24：空文件（0 字节或全空段落）显示空态提示
-                paragraphs.isEmpty() || paragraphs.all { it.isBlank() } -> Text(
+                // TC-F2-24：空文件/空章节（0 字节、全空段落或 epub 空 spine）显示空态提示
+                paragraphs == null || paragraphs.isEmpty() || paragraphs.all { it.isBlank() } -> Text(
                     "文件为空",
                     color = theme.foreground,
                     modifier = Modifier.align(Alignment.Center)
@@ -251,7 +260,7 @@ fun ReaderContent(
     }
 }
 
-/** epub 章节列表弹层（F2.7）：按 Chapter.level 缩进展示嵌套层级，点击跳转 */
+/** epub 章节列表弹层（F2.7）：AlertDialog 包裹 [ChapterListContent]（Robolectric 下对话框窗口不进语义树，列表主体单独抽测） */
 @Composable
 private fun ChapterListSheet(
     chapters: List<com.sample.docreader.core.model.Chapter>,
@@ -262,28 +271,42 @@ private fun ChapterListSheet(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("章节") },
-        text = {
-            LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
-                itemsIndexed(chapters, key = { index, _ -> index }) { index, chapter ->
-                    Text(
-                        chapter.title ?: "第 ${index + 1} 章",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(index) }
-                            .padding(
-                                start = ((chapter.level - 1) * 16).dp,
-                                end = 16.dp,
-                                top = 12.dp,
-                                bottom = 12.dp
-                            )
-                    )
-                }
-            }
-        },
+        text = { ChapterListContent(chapters, currentIndex, onSelect) },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("关闭") }
         }
     )
+}
+
+/** 章节列表主体：按 Chapter.level 缩进展示嵌套层级，当前章节高亮（主色+加粗+selected 语义），点击跳转 */
+@Composable
+internal fun ChapterListContent(
+    chapters: List<com.sample.docreader.core.model.Chapter>,
+    currentIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
+        itemsIndexed(chapters, key = { index, _ -> index }) { index, chapter ->
+            val isCurrent = index == currentIndex
+            Text(
+                // 与 topBar 一致：空白标题兜底"第 N 章"
+                chapter.title?.takeIf { it.isNotBlank() } ?: "第 ${index + 1} 章",
+                // 当前章节高亮（加粗 + 主色）
+                color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                fontWeight = if (isCurrent) FontWeight.Bold else null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(index) }
+                    .semantics { selected = isCurrent } // 供无障碍与 UI 测试识别当前章节
+                    .padding(
+                        start = ((chapter.level - 1) * 16).dp,
+                        end = 16.dp,
+                        top = 12.dp,
+                        bottom = 12.dp
+                    )
+            )
+        }
+    }
 }
 
 /** 底部工具条：换行模式 / 字号 A- A+ / 行距 / 字体 / 阅读主题；epub 追加章节列表与翻章。按钮均 ≥48dp */
