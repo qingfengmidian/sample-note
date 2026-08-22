@@ -116,4 +116,5 @@ CI（GitHub Actions，`.github/workflows/ci.yml`）两个 job：
 
 - 功能分支从 `main` 拉出（`feat/mN-xxx`），PR 合入；合入前 CI 绿 + 至少一人 Approve。
 - 每个里程碑结束打 `mN` tag（spike 为 `s1`）。
-- 当前进度（按 git 历史）：M0（工程骨架与 CI）、M1（fixtures + 设置基础设施 + FileOpener 桩）、M2（解析层）、M3（阅读器核心）已完成；下一步 S1/M4。里程碑明细、DoD 与风险见 `docs/开发计划.md`。
+- 双智能体协作（Kimi Code 架构/审查 + OpenCode 实现）见 `docs/协同开发规范.md`；任务简报、审查记录与决策日志放 `docs/collab/`。
+- 当前进度（按 git 历史）：M0~M6 与 S1 已完成（含 M5/M6 评审后的缺陷修复与边界测试补齐）；下一步 M7a（编辑器基础）。里程碑明细、DoD 与风险见 `docs/开发计划.md`。
