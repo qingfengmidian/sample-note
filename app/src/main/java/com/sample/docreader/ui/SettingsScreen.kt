@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -25,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sample.docreader.core.model.ReaderFont
@@ -116,7 +120,42 @@ fun SettingsScreen(onBack: () -> Unit) {
             message?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
+            // 编辑器设置（F3.6/TC-F3-06/07）：自动保存开关，默认关，开启后停顿 3s 自动写回
+            Text("编辑器", style = MaterialTheme.typography.titleSmall)
+            AutoSaveRow(
+                checked = settings.autoSave,
+                onCheckedChange = { enabled ->
+                    scope.launch { repository.save(settings.copy(autoSave = enabled)) }
+                }
+            )
         }
+    }
+}
+
+/**
+ * "自动保存"开关行（F3.6）：抽成无状态 composable 供 UI 测试直驱（同 EditorExitDialogContent 做法）。
+ * 可点击目标 ≥ 48dp，开关带 contentDescription 供无障碍与 UI 测试识别。
+ */
+@Composable
+internal fun AutoSaveRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("自动保存", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "编辑停顿 3 秒后自动写回文件（默认关闭）",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.semantics { contentDescription = "自动保存开关" }
+        )
     }
 }
 

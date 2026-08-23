@@ -38,11 +38,13 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.sample.docreader.core.io.ContentResolverDocumentWriter
 import com.sample.docreader.core.io.DelegatingFileOpener
+import com.sample.docreader.core.io.DraftStore
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.settings.SettingsRepository
@@ -72,7 +74,10 @@ fun EditorScreen(
                 fileOpener = DelegatingFileOpener(context),
                 settingsRepository = SettingsRepository(context),
                 documentWriter = ContentResolverDocumentWriter(context.contentResolver),
-                cacheDir = context.cacheDir
+                cacheDir = context.cacheDir,
+                // M7c：草稿落 filesDir/edit_recovery/；uri/光标经 SavedStateHandle 跨进程死亡保留
+                draftStore = DraftStore(context.filesDir),
+                savedStateHandle = createSavedStateHandle()
             )
         }
     })
@@ -127,7 +132,11 @@ fun EditorScreen(
             exitAfterSave = true
             viewModel.save()
         },
-        onDiscard = onBack,
+        onDiscard = {
+            // 三选"放弃"（TC-UT-09b）：删除草稿后退出，避免下次打开误恢复
+            viewModel.discardDraft()
+            onBack()
+        },
         onCancelExit = { showExitDialog = false },
         onBack = onBack
     )
