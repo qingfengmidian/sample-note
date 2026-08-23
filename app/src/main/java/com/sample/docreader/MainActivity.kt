@@ -15,6 +15,7 @@ import com.sample.docreader.ui.AppTheme
 import com.sample.docreader.ui.FixtureEntryScreen
 import com.sample.docreader.ui.HomeScreen
 import com.sample.docreader.ui.SettingsScreen
+import com.sample.docreader.ui.editor.EditorScreen
 import com.sample.docreader.ui.reader.ReaderScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -52,6 +53,25 @@ class MainActivity : ComponentActivity() {
                         val uri = entry.arguments?.getString("uri").orEmpty()
                         val name = entry.arguments?.getString("name").orEmpty()
                         ReaderScreen(
+                            uri = uri,
+                            format = format,
+                            displayName = name,
+                            onBack = { navController.popBackStack() },
+                            onEdit = {
+                                navController.navigate(
+                                    "editor/${format.name}/${Uri.encode(uri)}/${Uri.encode(name)}"
+                                )
+                            }
+                        )
+                    }
+                    composable("editor/{format}/{uri}/{name}") { entry ->
+                        val format = entry.arguments?.getString("format")
+                            ?.let { runCatching { DocFormat.valueOf(it) }.getOrNull() }
+                            ?: DocFormat.TXT
+                        // Navigation 已对路径参数解码一次，这里不能再 Uri.decode（同 reader 路由，见 37e252b）
+                        val uri = entry.arguments?.getString("uri").orEmpty()
+                        val name = entry.arguments?.getString("name").orEmpty()
+                        EditorScreen(
                             uri = uri,
                             format = format,
                             displayName = name,

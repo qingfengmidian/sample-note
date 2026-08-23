@@ -67,7 +67,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** 阅读界面（设计§4）：顶部栏（书名/章节名）+ 正文区 + 底部工具条 + epub 章节列表/翻章。 */
 @Composable
-fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit, displayName: String? = null) {
+fun ReaderScreen(
+    uri: String,
+    format: DocFormat,
+    onBack: () -> Unit,
+    displayName: String? = null,
+    onEdit: () -> Unit = {}
+) {
     val context = LocalContext.current
     val viewModel: ReaderViewModel = viewModel(factory = viewModelFactory {
         initializer {
@@ -97,7 +103,8 @@ fun ReaderScreen(uri: String, format: DocFormat, onBack: () -> Unit, displayName
         onPrevChapter = { viewModel.selectChapter(state.chapterIndex - 1) },
         onNextChapter = { viewModel.selectChapter(state.chapterIndex + 1) },
         onFirstVisibleParagraphChanged = viewModel::onFirstVisibleParagraphChanged,
-        onRestoreParagraphConsumed = viewModel::consumeRestoreParagraph
+        onRestoreParagraphConsumed = viewModel::consumeRestoreParagraph,
+        onEdit = onEdit
     )
 }
 
@@ -120,7 +127,8 @@ fun ReaderContent(
     onPrevChapter: (() -> Unit)? = null,
     onNextChapter: (() -> Unit)? = null,
     onFirstVisibleParagraphChanged: ((Int) -> Unit)? = null,
-    onRestoreParagraphConsumed: (() -> Unit)? = null
+    onRestoreParagraphConsumed: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null
 ) {
     val settings = state.settings
     val theme = resolveReadingTheme(settings.theme)
@@ -129,6 +137,7 @@ fun ReaderContent(
     val paragraphs = chapter?.paragraphs
     val isEpub = state.document?.format == DocFormat.EPUB
     val isMd = state.document?.format == DocFormat.MD
+    val isTxt = state.document?.format == DocFormat.TXT
     // rememberSaveable：旋转/重建后不丢预览状态
     var mdPreview by rememberSaveable { mutableStateOf(false) }
     val mdBlocks = remember(paragraphs, isMd) {
@@ -192,11 +201,16 @@ fun ReaderContent(
                                 }
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("编辑（M7 里程碑）") },
-                            onClick = {},
-                            enabled = false
-                        )
+                        // 编辑入口仅 md/txt 显示（F3.1/F4.1：epub/xml 只读）
+                        if (isMd || isTxt) {
+                            DropdownMenuItem(
+                                text = { Text("编辑") },
+                                onClick = {
+                                    menuOpen = false
+                                    onEdit?.invoke()
+                                }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
