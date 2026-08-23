@@ -99,7 +99,8 @@ class EditorDraftTest {
     ) = EditorViewModel(
         fileOpener = FakeOpener(originalText),
         documentWriter = writer,
-        cacheDir = tmpFolder.newFolder("cache"),
+        // 无参 newFolder() 每次生成唯一目录：进程重建用例需先后构造两个 VM，固定名会抛已存在
+        cacheDir = tmpFolder.newFolder(),
         draftStore = draftStore,
         savedStateHandle = handle
     )
@@ -274,8 +275,9 @@ class EditorDraftTest {
         advanceUntilIdle()
 
         vm.onContentChange(TextFieldValue("原始内容第一行 + 自动保存"))
+        // 窗口内段不接 advanceUntilIdle（它会推进虚拟时间跑完所有挂起任务，必然触发 3s 防抖；
+        // 同 tcUt09b_draftWrittenAfterDebounce 的 400ms 段模式），仅推进到 2s 即断言
         advanceTimeBy(2000)
-        advanceUntilIdle()
         assertTrue("3s 防抖窗口内不应落盘", writer.modes.isEmpty())
 
         advanceTimeBy(1500) // 累计 3.5s

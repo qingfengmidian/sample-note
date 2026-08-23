@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sample.docreader.core.format.FormatSniffer
+import com.sample.docreader.core.io.DraftStore
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.recent.RecentFile
 import com.sample.docreader.core.recent.RecentFilesRepository
@@ -27,16 +28,20 @@ data class OpenTarget(val uri: String, val name: String, val format: DocFormat)
 data class HomeUiState(
     val recent: List<RecentFile> = emptyList(),
     val message: String? = null,
-    val openTarget: OpenTarget? = null
+    val openTarget: OpenTarget? = null,
+    /** 新建文件（F3.5/TC-F3-08）导航目标：指向编辑器而非阅读器 */
+    val editTarget: OpenTarget? = null
 )
 
 /**
  * 首页 ViewModel（M4）：SAF 打开文件（嗅探格式、持久权限、记录最近），
  * 以及最近列表的打开/删除/清空。文件访问走 Dispatchers.IO。
+ * M7c：新建文件（F3.5）、最近列表删除/清空联动删草稿（F4.6）、启动清理孤儿草稿（TC-F4-06a）。
  */
 class HomeViewModel(
     private val recentRepository: RecentFilesRepository,
-    private val resolver: ContentResolver
+    private val resolver: ContentResolver,
+    private val draftStore: DraftStore? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -47,6 +52,10 @@ class HomeViewModel(
             recentRepository.recent.collect { list ->
                 _uiState.update { it.copy(recent = list) }
             }
+        }
+        // 启动清理 7 天前的孤儿草稿（TC-F4-06a ③）；无 draftStore 时降级为无操作
+        draftStore?.let { store ->
+            viewModelScope.launch(Dispatchers.IO) { store.cleanupOrphans() }
         }
     }
 
@@ -101,11 +110,41 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * 新建文件（F3.5/TC-F3-08）：用户在 ACTION_CREATE_DOCUMENT 选择器中命名后调用。
+     * 持久化写权限（读权限一并取，供编辑器载入空文件）→ 记录最近 → 触发编辑器导航。
+     * format 由首页"新建"入口的 mimeType 决定（md/txt）；失败给一次性提示。
+     */
+    fun createNew(uri: Uri, format: DocFormat) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    takePersistableWritePermission(uri)
+                    val name = queryDisplayName(uri)
+                        ?: "未命名.${if (format == DocFormat.MD) "md" else "txt"}"
+                    recentRepository.touch(uri.toString(), name, format)
+                    _uiState.update {
+                        it.copy(editTarget = OpenTarget(uri.toString(), name, format))
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(message = "新建文件失败：无法访问所选位置") }
+            }
+        }
+    }
+
+    /** 单条删除：联动删除对应编辑草稿（F4.6 数据一致性，不动 Repository 职责） */
     fun remove(uri: String) {
+        draftStore?.delete(uri)
         viewModelScope.launch { recentRepository.remove(uri) }
     }
 
+    /** 清空最近列表：联动删除所有已记录文件的草稿（F4.6） */
     fun clear() {
+        val store = draftStore
+        if (store != null) _uiState.value.recent.forEach { store.delete(it.uri) }
         viewModelScope.launch { recentRepository.clear() }
     }
 
@@ -113,10 +152,22 @@ class HomeViewModel(
 
     fun consumeOpenTarget() = _uiState.update { it.copy(openTarget = null) }
 
+    fun consumeEditTarget() = _uiState.update { it.copy(editTarget = null) }
+
     private fun takePersistableReadPermission(uri: Uri) {
         // 部分虚拟文档/Provider 不支持持久权限，失败不影响本次打开
         runCatching {
             resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    /** 新建文件：取写权限（读权限一并取，供编辑器载入）；Provider 不支持时降级为本次可用 */
+    private fun takePersistableWritePermission(uri: Uri) {
+        runCatching {
+            resolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
         }
     }
 

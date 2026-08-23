@@ -41,6 +41,12 @@ class MainActivity : ComponentActivity() {
                                     "reader/${format.name}/${Uri.encode(uri)}/${Uri.encode(name)}"
                                 )
                             },
+                            // 新建文件（F3.5/TC-F3-08）：创建成功后直接进入编辑器（空文件）
+                            onOpenEditor = { uri, name, format ->
+                                navController.navigate(
+                                    "editor/${format.name}/${Uri.encode(uri)}/${Uri.encode(name)}"
+                                )
+                            },
                             pendingViewUri = viewUri,
                             onViewUriConsumed = { pendingViewUri.value = null }
                         )
