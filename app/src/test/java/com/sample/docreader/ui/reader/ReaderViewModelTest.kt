@@ -323,4 +323,22 @@ class ReaderViewModelTest {
         repeat(10) { vm.stepFontSize(-1) }
         assertEquals(12, vm.uiState.value.settings.fontSizeSp)
     }
+
+    /**
+     * TC-F3-09（VM 侧，M7b 先行失败测试）：超过可编辑上限（设计§8，10 MB）的 txt 只读——
+     * `ReaderUiState.editable` 新增字段（默认 true），按加载字节数判定；UI 据此将编辑入口置灰并附说明。
+     */
+    @Test
+    fun tcF309_hugeFile_notEditable_normalFileEditable() = runTest {
+        val (bigVm, _) = newViewModel(this)
+        bigVm.load("asset:///fixtures/huge.txt", DocFormat.TXT) // 15 MB fixture（TC-F3-09 指定）
+        awaitLoaded(bigVm)
+        assertEquals(null, bigVm.uiState.value.error)
+        assertFalse("15MB 超出 10MB 可编辑上限，应只读", bigVm.uiState.value.editable)
+
+        val (vm, _) = newViewModel(this)
+        vm.load("asset:///fixtures/sample_utf8.txt", DocFormat.TXT)
+        awaitLoaded(vm)
+        assertTrue("正常小文件应可编辑", vm.uiState.value.editable)
+    }
 }
