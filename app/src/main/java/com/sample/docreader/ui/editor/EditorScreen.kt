@@ -41,10 +41,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.sample.docreader.core.io.ContentResolverDocumentWriter
 import com.sample.docreader.core.io.DelegatingFileOpener
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.settings.SettingsRepository
+import com.sample.docreader.ui.reader.ReaderReloadNotifier
 import com.sample.docreader.ui.reader.fontFamilyFor
 import com.sample.docreader.ui.reader.lineHeightSp
 import com.sample.docreader.ui.reader.resolveReadingTheme
@@ -68,7 +70,9 @@ fun EditorScreen(
         initializer {
             EditorViewModel(
                 fileOpener = DelegatingFileOpener(context),
-                settingsRepository = SettingsRepository(context)
+                settingsRepository = SettingsRepository(context),
+                documentWriter = ContentResolverDocumentWriter(context.contentResolver),
+                cacheDir = context.cacheDir
             )
         }
     })
@@ -78,12 +82,37 @@ fun EditorScreen(
 
     // 退出拦截（F3.2）：dirty 时拦截返回弹出三选对话框；非 dirty 直接退出（BackHandler 不注册）
     var showExitDialog by rememberSaveable { mutableStateOf(false) }
+    var exitAfterSave by rememberSaveable { mutableStateOf(false) }
+    var feedback by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = viewModel.dirty) { showExitDialog = true }
+
+    // 保存结果一次性事件（M7b）：消费并给反馈；三选对话框"保存"成功后回退阅读页
+    LaunchedEffect(viewModel.saveResult) {
+        when (val result = viewModel.saveResult) {
+            null -> Unit
+            SaveResult.Success -> {
+                // 通知阅读页重载新内容（TC-F3-02）
+                ReaderReloadNotifier.notifySaved(uri)
+                if (exitAfterSave) {
+                    exitAfterSave = false
+                    onBack()
+                } else {
+                    feedback = saveResultMessage(result)
+                }
+            }
+            SaveResult.FailedSaveAs, SaveResult.ProviderKilled -> {
+                exitAfterSave = false
+                feedback = saveResultMessage(result)
+            }
+        }
+        viewModel.consumeSaveResult()
+    }
 
     EditorContent(
         content = viewModel.content,
         canUndo = viewModel.canUndo,
         canRedo = viewModel.canRedo,
+        dirty = viewModel.dirty,
         settings = viewModel.settings,
         displayName = viewModel.displayName.ifBlank { displayName.orEmpty() },
         loading = viewModel.loading,
@@ -92,11 +121,35 @@ fun EditorScreen(
         onContentChange = viewModel::onContentChange,
         onUndo = viewModel::undo,
         onRedo = viewModel::redo,
-        onSave = { /* M7b 接入保存落盘 */ },
+        onSave = { viewModel.save() },
+        onSaveAndExit = {
+            showExitDialog = false
+            exitAfterSave = true
+            viewModel.save()
+        },
         onDiscard = onBack,
         onCancelExit = { showExitDialog = false },
         onBack = onBack
     )
+
+    // 保存结果反馈（从简，AlertDialog；Success/FailedSaveAs/ProviderKilled 分别提示）
+    feedback?.let { message ->
+        AlertDialog(
+            onDismissRequest = { feedback = null },
+            title = { Text("保存") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { feedback = null }) { Text("确定") }
+            }
+        )
+    }
+}
+
+/** 保存结果 → 提示文案（M7b；ProviderKilled 文案与阅读页对齐，见 S1 探针结论） */
+internal fun saveResultMessage(result: SaveResult): String = when (result) {
+    SaveResult.Success -> "已保存"
+    SaveResult.FailedSaveAs -> "保存失败，文件提供方不支持写入或文件不可写，请另存为"
+    SaveResult.ProviderKilled -> "文件提供方（如云盘应用）未运行，请启动对应应用后重试"
 }
 
 /**
@@ -109,6 +162,7 @@ fun EditorContent(
     content: TextFieldValue,
     canUndo: Boolean,
     canRedo: Boolean,
+    dirty: Boolean,
     settings: ReadingSettings,
     displayName: String,
     loading: Boolean,
@@ -118,6 +172,7 @@ fun EditorContent(
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onSave: () -> Unit,
+    onSaveAndExit: () -> Unit,
     onDiscard: () -> Unit,
     onCancelExit: () -> Unit,
     onBack: () -> Unit
@@ -143,8 +198,8 @@ fun EditorContent(
                 actions = {
                     EditorTopBarButton("撤销", enabled = canUndo, onClick = onUndo)
                     EditorTopBarButton("重做", enabled = canRedo, onClick = onRedo)
-                    // 保存：M7b 接入，本次禁用（TC-F3-03 保存分支手工验收推迟到 M7b）
-                    EditorTopBarButton("保存", enabled = false, onClick = onSave)
+                    // 保存：dirty 且有内容变更时可点（TC-F3-01/02，M7b 接通落盘）
+                    EditorTopBarButton("保存", enabled = dirty && !loading, onClick = onSave)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = theme.background,
@@ -181,7 +236,7 @@ fun EditorContent(
 
     if (showExitDialog) {
         EditorExitDialog(
-            onSave = onSave,
+            onSave = onSaveAndExit,
             onDiscard = onDiscard,
             onCancel = onCancelExit
         )
@@ -221,7 +276,7 @@ private fun EditorExitDialog(
  * 三选对话框内容主体（TC-F3-03）。
  * Robolectric 下 AlertDialog 窗口内容不进语义树，抽成可直驱的 internal composable 供 TC-UI-04 测试
  * （同 ReaderChapterListTest 的 ChapterListContent 做法）。
- * 保存项 M7b 接入，本次渲染为 disabled 并带 contentDescription。
+ * 保存项 M7b 接通：点击触发 onSave（保存成功后由 EditorScreen 回退阅读页）。
  */
 @Composable
 internal fun EditorExitDialogContent(
@@ -233,7 +288,6 @@ internal fun EditorExitDialogContent(
         Text("是否保存对文件的修改？")
         TextButton(
             onClick = onSave,
-            enabled = false,
             modifier = Modifier
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 48.dp)

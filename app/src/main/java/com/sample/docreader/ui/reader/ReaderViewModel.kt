@@ -32,7 +32,8 @@ data class ReaderUiState(
     val settings: ReadingSettings = ReadingSettings(),
     val error: String? = null,             // ParseException 差异化文案
     val chapterIndex: Int = 0,             // 当前章节索引（epub 多章）
-    val restoreParagraph: Int? = null      // 加载/切章后待滚动到的段落索引（一次性）
+    val restoreParagraph: Int? = null,     // 加载/切章后待滚动到的段落索引（一次性）
+    val editable: Boolean = true           // 文件 ≤10MB 可编辑，超出只读（TC-F3-09，设计§8）
 )
 
 /**
@@ -67,6 +68,7 @@ class ReaderViewModel(
                 val name = displayName?.takeIf { it.isNotBlank() } ?: uri.substringAfterLast('/')
                 val document = parseBytes(bytes, name, uri, format)
                 currentUri = uri
+                val editable = bytes.size <= MAX_EDITABLE_BYTES
                 val restored = progressRepository?.progress(uri)?.first()
                 val chapterIndex = restored?.chapter
                     ?.coerceIn(0, (document.chapters.size - 1).coerceAtLeast(0)) ?: 0
@@ -79,7 +81,8 @@ class ReaderViewModel(
                         loading = false,
                         document = document,
                         chapterIndex = chapterIndex,
-                        restoreParagraph = currentParagraph
+                        restoreParagraph = currentParagraph,
+                        editable = editable
                     )
                 }
             } catch (e: ParseException) {
@@ -174,5 +177,8 @@ class ReaderViewModel(
     companion object {
         val FONT_SIZE_STEPS = listOf(12, 14, 16, 18, 20, 22, 24)
         val LINE_HEIGHT_STEPS = listOf(120, 150, 180, 200)
+
+        /** 可编辑文件大小上限（设计§8：默认 10MB 可编辑，超出只读） */
+        const val MAX_EDITABLE_BYTES = 10 * 1024 * 1024
     }
 }

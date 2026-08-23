@@ -29,15 +29,15 @@ class EditorExitDialogTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    /** TC-UI-04：保存项本次渲染为 disabled（M7b 接入）并带 contentDescription */
+    /** TC-UI-04：保存项 M7b 接通后不再 disabled，并带 contentDescription */
     @Test
-    fun tcUi04_saveDisabled_withContentDescription() {
+    fun tcUi04_saveEnabled_withContentDescription() {
         composeRule.setContent {
             EditorExitDialogContent(onSave = {}, onDiscard = {}, onCancel = {})
         }
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithContentDescription("保存").assertExists().assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("保存").assertExists().assertIsEnabled()
         composeRule.onNodeWithContentDescription("放弃").assertExists().assertIsEnabled()
         composeRule.onNodeWithContentDescription("取消").assertExists().assertIsEnabled()
     }
@@ -86,7 +86,7 @@ class EditorExitDialogTest {
         assertFalse(saveCalled)
     }
 
-    /** TC-UI-04（补充）：顶部栏撤销/重做/保存按钮 enable 状态与 canUndo/canRedo 一致，保存恒禁用 */
+    /** TC-UI-04（补充）：顶部栏撤销/重做按钮 enable 状态与 canUndo/canRedo 一致；保存 enable = dirty && !loading */
     @Test
     fun editorContent_undoRedoSave_buttonsReflectState() {
         composeRule.setContent {
@@ -94,6 +94,7 @@ class EditorExitDialogTest {
                 content = TextFieldValue("hello"),
                 canUndo = true,
                 canRedo = false,
+                dirty = true,
                 settings = ReadingSettings(),
                 displayName = "a.txt",
                 loading = false,
@@ -103,6 +104,7 @@ class EditorExitDialogTest {
                 onUndo = {},
                 onRedo = {},
                 onSave = {},
+                onSaveAndExit = {},
                 onDiscard = {},
                 onCancelExit = {},
                 onBack = {}
@@ -112,6 +114,64 @@ class EditorExitDialogTest {
 
         composeRule.onNodeWithContentDescription("撤销").assertIsEnabled()
         composeRule.onNodeWithContentDescription("重做").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("保存").assertIsEnabled()
+    }
+
+    /** TC-UI-04（M7b）：非 dirty 时保存按钮禁用（无可保存变更） */
+    @Test
+    fun editorContent_saveDisabled_whenNotDirty() {
+        composeRule.setContent {
+            EditorContent(
+                content = TextFieldValue("hello"),
+                canUndo = false,
+                canRedo = false,
+                dirty = false,
+                settings = ReadingSettings(),
+                displayName = "a.txt",
+                loading = false,
+                error = null,
+                showExitDialog = false,
+                onContentChange = {},
+                onUndo = {},
+                onRedo = {},
+                onSave = {},
+                onSaveAndExit = {},
+                onDiscard = {},
+                onCancelExit = {},
+                onBack = {}
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("保存").assertIsNotEnabled()
+    }
+
+    /** TC-UI-04（M7b）：加载中保存按钮禁用（即使 dirty） */
+    @Test
+    fun editorContent_saveDisabled_whenLoading() {
+        composeRule.setContent {
+            EditorContent(
+                content = TextFieldValue("hello"),
+                canUndo = false,
+                canRedo = false,
+                dirty = true,
+                settings = ReadingSettings(),
+                displayName = "a.txt",
+                loading = true,
+                error = null,
+                showExitDialog = false,
+                onContentChange = {},
+                onUndo = {},
+                onRedo = {},
+                onSave = {},
+                onSaveAndExit = {},
+                onDiscard = {},
+                onCancelExit = {},
+                onBack = {}
+            )
+        }
+        composeRule.waitForIdle()
+
         composeRule.onNodeWithContentDescription("保存").assertIsNotEnabled()
     }
 }
