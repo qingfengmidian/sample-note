@@ -44,11 +44,11 @@
 - F3.3：样式复用 `resolveReadingTheme`/`lineHeightSp`/`fontFamilyFor`，与阅读页同源。
 - 对话框内容抽为 `internal EditorExitDialogContent` 直驱测试，正确绕开 Robolectric AlertDialog 语义不可见的坑（沿用 ChapterListContent 模式）。
 
-### 待核验（等 OpenCode 收尾后独立重跑）
+### 待核验 → 均已通过（见下"独立复验结果"）
 
-- [ ] `./gradlew testDebugUnitTest` 重跑全绿（OpenCode 已跑过一次 BUILD SUCCESSFUL，需独立复验）
-- [ ] `./gradlew assembleDebug`（OpenCode 收尾任务执行中）
-- [ ] 测试报告 XML 核对用例数（预期 82 + 5（TC-UT-08）+ 4（TC-UI-04）= 91）
+- [x] `./gradlew testDebugUnitTest` 独立重跑全绿
+- [x] `./gradlew assembleDebug` 通过
+- [x] 测试报告 XML 核对：suites=20 tests=91 failures=0 errors=0（82 + 5 + 4，符合预期）
 
 ### 观察项（非阻塞）
 
@@ -66,6 +66,12 @@
 
 - OpenCode 无头模式下 `ask` = 自动拒绝，三次因非白名单命令（管道 `sort`、`xargs`/`echo`、`python3`）中断退出。白名单已补一轮；后续批次简报应加一句"未放行命令被拒时不要反复重试，换用已放行的内置工具或直接报告"。
 
+## 真机验收（2026-08-23，OnePlus PHM110 / ColorOS，WiFi adb 驱动 + 截图判读）
+
+- **TC-F3-03 通过**：dirty 状态按返回（首次 BACK 被输入法收键盘消费，第二次生效）弹出"未保存的修改"三选框；保存项置灰可见；取消 → 留页且内容（HelloAB）不丢；再次返回选放弃 → 回到阅读页且未写文件（重进编辑内容为原文）；非 dirty 按返回直接退出不弹框。保存→落盘分支属 M7b，本次置灰占位，符合简报声明。
+- **TC-F3-04 通过**：输入 ABC（3 步历史）→ 撤销×3 恢复原文（撤销按钮随之禁用）→ 重做×2 恢复 "AB"，按钮 enable 状态与栈状态一致。
+- **TC-F3-05 通过**：阅读页设置 增大字号/行距 180%/衬线/护眼绿 后进编辑页，截图对比字号、行距、字体、背景/前景色与阅读页一致。
+
 ## 结论
 
-**接受**。范围、不变量、TC-UT-08/TC-UI-04 自动化验收全部通过；剩余手工项（TC-F3-03/04/05）留真机验收，已知缺口（保存/草稿/新建）均属 M7b/M7c 计划内。建议合入 main，里程碑 tag 待 M7c 完成 M7 整体后打 `m7`。
+**接受**。范围、不变量、TC-UT-08/TC-UI-04 自动化验收全部通过；手工项 TC-F3-03/04/05 真机验收通过（保存分支待 M7b）。`m7` tag 待 M7c 完成 M7 整体后打。
