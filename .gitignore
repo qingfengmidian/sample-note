@@ -8,3 +8,5 @@ build/
 .cxx/
 app/src/test/resources/fixtures/
 app/src/debug/assets/fixtures/
+.kimi-code/
+.vmark/

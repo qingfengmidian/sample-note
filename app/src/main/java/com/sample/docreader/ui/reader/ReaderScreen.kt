@@ -66,6 +66,10 @@ import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** 阅读界面（设计§4）：顶部栏（书名/章节名）+ 正文区 + 底部工具条 + epub 章节列表/翻章。 */
+
+/** 超大文件（>10MB）编辑入口置灰说明文字（TC-F3-09，设计§8） */
+const val EDIT_HINT_TOO_LARGE = "编辑（文件超过 10MB，仅可只读）"
+
 @Composable
 fun ReaderScreen(
     uri: String,
@@ -86,6 +90,14 @@ fun ReaderScreen(
     })
     LaunchedEffect(uri) {
         if (viewModel.uiState.value.document == null) {
+            viewModel.load(uri, format, displayName)
+        }
+    }
+    // 编辑保存成功后的重载（TC-F3-02）：观察保存信号，命中本 uri 即消费并重载一次
+    val reloadUris by ReaderReloadNotifier.savedUris.collectAsStateWithLifecycle()
+    LaunchedEffect(uri, reloadUris) {
+        if (uri in reloadUris) {
+            ReaderReloadNotifier.consume(uri)
             viewModel.load(uri, format, displayName)
         }
     }
@@ -201,10 +213,12 @@ fun ReaderContent(
                                 }
                             )
                         }
-                        // 编辑入口仅 md/txt 显示（F3.1/F4.1：epub/xml 只读）
+                        // 编辑入口仅 md/txt 显示（F3.1/F4.1：epub/xml 只读）；
+                        // 超出可编辑上限（>10MB）置灰并附说明，仅可只读浏览（TC-F3-09，设计§8）
                         if (isMd || isTxt) {
                             DropdownMenuItem(
-                                text = { Text("编辑") },
+                                text = { Text(if (state.editable) "编辑" else EDIT_HINT_TOO_LARGE) },
+                                enabled = state.editable,
                                 onClick = {
                                     menuOpen = false
                                     onEdit?.invoke()
