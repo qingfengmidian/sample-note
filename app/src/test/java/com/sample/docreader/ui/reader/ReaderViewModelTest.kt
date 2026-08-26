@@ -140,6 +140,18 @@ class ReaderViewModelTest {
         assertEquals(ParseException.NoPermission().message, s.error)
     }
 
+    /** TC-F2-23（端到端，M8a）：broken.epub（缺 OPF）经完整 load 链路，error 透传 MissingOpf 差异化文案，非笼统"文件损坏" */
+    @Test
+    fun load_brokenEpub_showsMissingOpfMessage() = runTest {
+        val (vm, _) = newViewModel(this)
+        vm.load("asset:///fixtures/broken.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+        val s = vm.uiState.value
+        assertFalse(s.loading)
+        assertNull(s.document)
+        assertEquals(ParseException.MissingOpf().message, s.error)
+    }
+
     @Test
     fun load_epub_parsesChapters() = runTest {
         val (vm, _) = newViewModel(this)
