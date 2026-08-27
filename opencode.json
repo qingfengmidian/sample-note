@@ -9,6 +9,8 @@
       "ls *": "allow",
       "pwd": "allow",
       "grep *": "allow",
+      "sed *": "allow",
+      "awk *": "allow",
       "find *": "allow",
       "cat *": "allow",
       "sort *": "allow",

@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -33,7 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
+import com.sample.docreader.core.model.ReadingTheme
+import com.sample.docreader.core.model.WrapMode
 import com.sample.docreader.core.settings.SettingsRepository
+import com.sample.docreader.ui.reader.ReaderViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,7 +47,9 @@ import java.util.UUID
 
 /**
  * 设置页（M4）：自定义字体导入（SAF 选 ttf/otf → 复制到 files/fonts/ → Typeface 预验证 → 存路径）。
- * 其余阅读排版设置（字号/行距/换行/主题）在阅读界面底部工具条内即时调节（设计§4）。
+ * 全局阅读默认项（M8a，F4.3/TC-F4-03）：默认字号/行距/换行/字体/主题，修改即时经 SettingsRepository
+ * 持久化；档位序列与阅读页 ReaderViewModel（stepFontSize/cycleLineHeight/cycleFont/cycleTheme）完全一致，
+ * 阅读页订阅同一份 settings flow，新打开的文件自然应用新默认值。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,6 +95,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -120,13 +128,54 @@ fun SettingsScreen(onBack: () -> Unit) {
             message?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
-            // 编辑器设置（F3.6/TC-F3-06/07）：自动保存开关，默认关，开启后停顿 3s 自动写回
+            // 编辑器设置（F3.6/TC-F3-06/07）：自动保存开关，默认关，开启后停顿 3s 自动写回。
+            // 置于阅读默认值之前：保持 M7c 起即有的屏幕内位置，避免 Robolectric 默认可视区外 performClick 失效
             Text("编辑器", style = MaterialTheme.typography.titleSmall)
             AutoSaveRow(
                 checked = settings.autoSave,
                 onCheckedChange = { enabled ->
                     scope.launch { repository.save(settings.copy(autoSave = enabled)) }
                 }
+            )
+            // 全局阅读默认项（F4.3/TC-F4-03，M8a）：档位逻辑与 ReaderViewModel 完全一致，即时持久化
+            Text("阅读默认值", style = MaterialTheme.typography.titleSmall)
+            FontSizeSettingRow(
+                fontSizeSp = settings.fontSizeSp,
+                onStep = { delta ->
+                    scope.launch { repository.save(settings.copy(fontSizeSp = stepFontSize(settings.fontSizeSp, delta))) }
+                }
+            )
+            CycleSettingRow(
+                title = "默认行距",
+                value = "${settings.lineHeightPercent}%",
+                onClick = {
+                    scope.launch {
+                        repository.save(settings.copy(lineHeightPercent = nextLineHeight(settings.lineHeightPercent)))
+                    }
+                }
+            )
+            CycleSettingRow(
+                title = "默认换行模式",
+                value = if (settings.wrapMode == WrapMode.WRAP) "自动换行" else "不换行",
+                onClick = {
+                    scope.launch {
+                        repository.save(
+                            settings.copy(
+                                wrapMode = if (settings.wrapMode == WrapMode.WRAP) WrapMode.NO_WRAP else WrapMode.WRAP
+                            )
+                        )
+                    }
+                }
+            )
+            CycleSettingRow(
+                title = "默认字体",
+                value = fontLabel(settings.font),
+                onClick = { scope.launch { repository.save(settings.copy(font = nextFont(settings.font))) } }
+            )
+            CycleSettingRow(
+                title = "默认阅读主题",
+                value = themeLabel(settings.theme),
+                onClick = { scope.launch { repository.save(settings.copy(theme = nextTheme(settings.theme))) } }
             )
         }
     }
@@ -189,4 +238,91 @@ private fun fontLabel(font: ReaderFont): String = when (font) {
     ReaderFont.SERIF -> "衬线"
     ReaderFont.SANS -> "无衬线"
     ReaderFont.CUSTOM -> "自定义"
+}
+
+/**
+ * "默认字号"行（F4.3/TC-F4-03）：A- / A+ 步进按钮，档位与端点 clamp 同 ReaderViewModel.stepFontSize。
+ * 按钮 contentDescription "减小默认字号"/"增大默认字号"，可点击目标 ≥ 48dp。
+ */
+@Composable
+private fun FontSizeSettingRow(fontSizeSp: Int, onStep: (Int) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("默认字号", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text("${fontSizeSp}sp", style = MaterialTheme.typography.bodyMedium)
+        TextButton(
+            onClick = { onStep(-1) },
+            modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics { contentDescription = "减小默认字号" }
+        ) { Text("A-") }
+        TextButton(
+            onClick = { onStep(1) },
+            modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics { contentDescription = "增大默认字号" }
+        ) { Text("A+") }
+    }
+}
+
+/**
+ * 循环切换设置行（F4.3/TC-F4-03）：行距/换行模式/字体/主题通用。
+ * 切换按钮 contentDescription 与行文本同名（约定见 SettingsGlobalTest），可点击目标 ≥ 48dp。
+ */
+@Composable
+private fun CycleSettingRow(title: String, value: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+        TextButton(
+            onClick = onClick,
+            modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics { contentDescription = title }
+        ) { Text("切换") }
+    }
+}
+
+/** 字号档位步进（12/14/16/18/20/22/24），到端点 clamp；与 ReaderViewModel.stepFontSize 同一套档位常量 */
+private fun stepFontSize(current: Int, delta: Int): Int {
+    val steps = ReaderViewModel.FONT_SIZE_STEPS
+    val index = steps.indexOf(current).coerceAtLeast(0)
+    return steps[(index + delta).coerceIn(0, steps.lastIndex)]
+}
+
+/** 行距档位循环：120→150→180→200（与 ReaderViewModel.cycleLineHeight 一致） */
+private fun nextLineHeight(current: Int): Int {
+    val steps = ReaderViewModel.LINE_HEIGHT_STEPS
+    val index = steps.indexOf(current)
+    return steps[(index + 1).mod(steps.size)]
+}
+
+/** 字体循环：代码→衬线→无衬线（与 ReaderViewModel.cycleFont 一致；CUSTOM 由上方导入区块管理） */
+private fun nextFont(current: ReaderFont): ReaderFont {
+    val order = listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
+    return order[(order.indexOf(current) + 1).mod(order.size)]
+}
+
+/** 主题循环：跟随系统→默认白→护眼绿→柔光米黄→夜间黑（与 ReaderViewModel.cycleTheme 一致） */
+private fun nextTheme(current: ReadingTheme?): ReadingTheme? {
+    val order = listOf(null, ReadingTheme.DEFAULT, ReadingTheme.EYE_CARE,
+        ReadingTheme.SOFT_LIGHT, ReadingTheme.NIGHT)
+    return order[(order.indexOf(current) + 1).mod(order.size)]
+}
+
+private fun themeLabel(theme: ReadingTheme?): String = when (theme) {
+    null -> "跟随系统"
+    ReadingTheme.DEFAULT -> "默认白"
+    ReadingTheme.EYE_CARE -> "护眼绿"
+    ReadingTheme.SOFT_LIGHT -> "柔光米黄"
+    ReadingTheme.NIGHT -> "夜间黑"
 }
