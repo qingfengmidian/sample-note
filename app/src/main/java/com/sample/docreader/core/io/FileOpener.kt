@@ -11,6 +11,12 @@ import java.io.InputStream
 interface FileOpener {
     /** 打开文档内容流。uri 形式由实现定义（asset:/// 或 content://）。 */
     fun open(uri: String): InputStream
+
+    /**
+     * 文件字节长度（M8b，用于 txt 分块加载的 editable 判定与进度参考）。
+     * 无法获知时返回 null（调用方按未知处理：先按可编辑，EOF 后按累计字节修正）。
+     */
+    fun length(uri: String): Long? = null
 }
 
 /** M3 开发期桩：从 debug assets 读取 fixtures。uri 形如 asset:///fixtures/sample_utf8.txt */

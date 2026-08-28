@@ -33,7 +33,9 @@ data class ReaderUiState(
     val error: String? = null,             // ParseException 差异化文案
     val chapterIndex: Int = 0,             // 当前章节索引（epub 多章）
     val restoreParagraph: Int? = null,     // 加载/切章后待滚动到的段落索引（一次性）
-    val editable: Boolean = true           // 文件 ≤10MB 可编辑，超出只读（TC-F3-09，设计§8）
+    val editable: Boolean = true,          // 文件 ≤10MB 可编辑，超出只读（TC-F3-09，设计§8）
+    val hasMore: Boolean = false,          // txt 分块加载：还有未加载段落（M8b，F4.2）
+    val loadingMore: Boolean = false       // txt 分块加载：正在追加下一块（防重入）
 )
 
 /**
@@ -131,6 +133,16 @@ class ReaderViewModel(
 
     /** UI 完成一次 restoreParagraph 滚动后调用，清除一次性目标 */
     fun consumeRestoreParagraph() = _uiState.update { it.copy(restoreParagraph = null) }
+
+    /**
+     * txt 分块加载（M8b，F4.2）：滚动接近底部（余量 [com.sample.docreader.core.parse.PagedTextLoader.PREFETCH_MARGIN] 段）
+     * 且 hasMore && !loadingMore 时由 UI 触发，追加下一块到首章段落末尾；非分块路径（md/xml/epub）调用为空操作。
+     * 契约：防重入；追加保持段落索引稳定（只 append，不重排）；EOF 后 hasMore=false；
+     * length 未知的文件在 EOF 时按累计字节修正 editable。
+     */
+    fun loadMore() {
+        // M8b 实现：当前为契约桩（无分页加载器时空操作）
+    }
 
     private fun persistProgress(chapter: Int, paragraph: Int) {
         val repo = progressRepository ?: return
