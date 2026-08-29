@@ -3,6 +3,7 @@ package com.sample.docreader.ui.reader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sample.docreader.core.io.FileOpener
+import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.Document
 import com.sample.docreader.core.model.ParseException
@@ -11,18 +12,21 @@ import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
 import com.sample.docreader.core.parse.EpubParser
+import com.sample.docreader.core.parse.PagedTextLoader
 import com.sample.docreader.core.parse.ParserFactory
 import com.sample.docreader.core.parse.PlainTextParser
 import com.sample.docreader.core.parse.TxtParser
 import com.sample.docreader.core.progress.ProgressRepository
 import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.FileNotFoundException
 
 /** 阅读界面状态（设计§3.3：ReaderViewModel 向 UI 暴露单个 StateFlow） */
@@ -33,7 +37,9 @@ data class ReaderUiState(
     val error: String? = null,             // ParseException 差异化文案
     val chapterIndex: Int = 0,             // 当前章节索引（epub 多章）
     val restoreParagraph: Int? = null,     // 加载/切章后待滚动到的段落索引（一次性）
-    val editable: Boolean = true           // 文件 ≤10MB 可编辑，超出只读（TC-F3-09，设计§8）
+    val editable: Boolean = true,          // 文件 ≤10MB 可编辑，超出只读（TC-F3-09，设计§8）
+    val hasMore: Boolean = false,          // txt 分块加载：还有未加载段落（M8b，F4.2）
+    val loadingMore: Boolean = false       // txt 分块加载：正在追加下一块（防重入）
 )
 
 /**
@@ -53,6 +59,18 @@ class ReaderViewModel(
     private var currentUri: String = ""
     private var currentParagraph: Int = 0
 
+    /** txt 分块加载器（M8b）：仅分页路径持有；重新 load/onCleared 时关闭，防 fd 泄漏（TC-F4-08 同类） */
+    private var pagedLoader: PagedTextLoader? = null
+
+    override fun onCleared() {
+        closePagedLoader()
+    }
+
+    private fun closePagedLoader() {
+        pagedLoader?.close()
+        pagedLoader = null
+    }
+
     init {
         // 全局设置变化即时反映到阅读界面
         viewModelScope.launch {
@@ -62,8 +80,14 @@ class ReaderViewModel(
 
     fun load(uri: String, format: DocFormat, displayName: String? = null) {
         viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, error = null) }
+            closePagedLoader() // 资源卫生：重载前关闭旧 loader
+            _uiState.update { it.copy(loading = true, error = null, hasMore = false, loadingMore = false) }
             try {
+                if (format == DocFormat.TXT) {
+                    // txt 一律走分块加载（M8b，F4.2）：小文件首块即全文，行为与全量解析一致
+                    loadTxtPaged(uri, displayName)
+                    return@launch
+                }
                 val bytes = fileOpener.open(uri).use { it.readBytes() }
                 val name = displayName?.takeIf { it.isNotBlank() } ?: uri.substringAfterLast('/')
                 val document = parseBytes(bytes, name, uri, format)
@@ -106,6 +130,49 @@ class ReaderViewModel(
         }
     }
 
+    /**
+     * txt 分块加载（M8b，F4.2/TC-F4-02）：首块（200 段）即上屏，其余由 [loadMore] 滚动追加。
+     * 进度恢复点超出首块时循环追加至覆盖或 EOF（有界）；editable 优先按 FileOpener.length 判定，
+     * length 未知（null）时持续读至 EOF 按累计字节修正（保证 TC-F3-09 判定正确）。
+     */
+    private suspend fun loadTxtPaged(uri: String, displayName: String?) {
+        val name = displayName?.takeIf { it.isNotBlank() } ?: uri.substringAfterLast('/')
+        val declaredLength = fileOpener.length(uri)
+        val loader = withContext(Dispatchers.IO) {
+            PagedTextLoader.open(fileOpener.open(uri))
+        }
+        pagedLoader = loader
+        currentUri = uri
+
+        val restored = progressRepository?.progress(uri)?.first()
+        val target = restored?.paragraph?.coerceAtLeast(0) ?: 0
+        // 单 IO 块内连续取块（避免块级线程切换）：首块即上屏所需；恢复点超出首块时追加至覆盖（有界）；
+        // length 未知（null）时读至 EOF，按累计字节修正 editable（保证 TC-F3-09 判定正确）
+        val paragraphs = ArrayList<String>()
+        withContext(Dispatchers.IO) {
+            do {
+                paragraphs += loader.nextChunk()
+            } while (loader.hasMore && (paragraphs.size <= target || declaredLength == null))
+        }
+
+        val editable = declaredLength?.let { it <= MAX_EDITABLE_BYTES }
+            ?: (loader.bytesRead <= MAX_EDITABLE_BYTES) // length 未知：EOF 后按累计字节修正
+        val document = Document(uri, name, DocFormat.TXT, listOf(Chapter(null, paragraphs)))
+        val maxParagraph = (paragraphs.size - 1).coerceAtLeast(0)
+        currentParagraph = target.coerceIn(0, maxParagraph)
+        _uiState.update {
+            it.copy(
+                loading = false,
+                document = document,
+                chapterIndex = 0,
+                restoreParagraph = currentParagraph,
+                editable = editable,
+                hasMore = loader.hasMore,
+                loadingMore = false
+            )
+        }
+    }
+
     private suspend fun parseBytes(bytes: ByteArray, name: String, uri: String, format: DocFormat): Document =
         when (val parser = ParserFactory.forFormat(format)) {
             is TxtParser -> parser.parseBytes(bytes, name, uri)
@@ -131,6 +198,44 @@ class ReaderViewModel(
 
     /** UI 完成一次 restoreParagraph 滚动后调用，清除一次性目标 */
     fun consumeRestoreParagraph() = _uiState.update { it.copy(restoreParagraph = null) }
+
+    /**
+     * txt 分块加载（M8b，F4.2）：滚动接近底部（余量 [com.sample.docreader.core.parse.PagedTextLoader.PREFETCH_MARGIN] 段）
+     * 且 hasMore && !loadingMore 时由 UI 触发，追加下一块到首章段落末尾；非分块路径（md/xml/epub）调用为空操作。
+     * 契约：防重入；追加保持段落索引稳定（只 append，不重排）；EOF 后 hasMore=false；
+     * length 未知的文件在 EOF 时按累计字节修正 editable。
+     */
+    fun loadMore() {
+        val loader = pagedLoader ?: return // 非分页路径：空操作
+        val s = _uiState.value
+        if (!s.hasMore || s.loadingMore) return // 防重入
+        _uiState.update { it.copy(loadingMore = true) }
+        viewModelScope.launch {
+            try {
+                val chunk = withContext(Dispatchers.IO) { loader.nextChunk() }
+                _uiState.update { st ->
+                    // load() 重载已替换 loader 时丢弃本次结果，避免污染新文档
+                    if (pagedLoader !== loader) return@update st
+                    val doc = st.document
+                        ?: return@update st.copy(loadingMore = false, hasMore = loader.hasMore)
+                    val first = doc.chapters.first()
+                    // 只 append：段落索引稳定（itemsIndexed key 为索引，重排会炸 UI）
+                    val chapters = listOf(first.copy(paragraphs = first.paragraphs + chunk)) +
+                        doc.chapters.drop(1)
+                    st.copy(
+                        document = doc.copy(chapters = chapters),
+                        hasMore = loader.hasMore,
+                        loadingMore = false
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 追加失败（流被外部关闭等）：停住加载态，已载内容保持可读
+                _uiState.update { it.copy(loadingMore = false, hasMore = loader.hasMore) }
+            }
+        }
+    }
 
     private fun persistProgress(chapter: Int, paragraph: Int) {
         val repo = progressRepository ?: return

@@ -117,5 +117,5 @@ CI（GitHub Actions，`.github/workflows/ci.yml`）两个 job：
 - 功能分支从 `main` 拉出（`feat/mN-xxx`），PR 合入；合入前 CI 绿 + 至少一人 Approve。
 - 每个里程碑结束打 `mN` tag（spike 为 `s1`）。
 - 双智能体协作（Kimi Code 架构/审查 + OpenCode 实现）见 `docs/协同开发规范.md`；任务简报、审查记录与决策日志放 `docs/collab/`。
-- 当前进度（按 git 历史）：M0\~M6、S1、M7a（编辑器基础）、M7b（保存流程 + 超大文件只读）、M7c（草稿恢复 + 自动保存 + 新建文件）与 M8a（设置页全项阅读默认值 F4.3 + TC-F2-23 钉死）已完成；下一步 M8b（大文件分块加载）。里程碑明细、DoD 与风险见 `docs/开发计划.md`。
+- 当前进度（按 git 历史）：M0\~M6、S1、M7a（编辑器基础）、M7b（保存流程 + 超大文件只读）、M7c（草稿恢复 + 自动保存 + 新建文件）、M8a（设置页全项阅读默认值 F4.3 + TC-F2-23 钉死）与 M8b（txt 大文件分块加载 F4.2，PagedTextLoader 首块 200 段 + 滚动追加）已完成；下一步 M8 收尾（真机 TC-F4-01~08 全量 + 性能/内存回归）。里程碑明细、DoD 与风险见 `docs/开发计划.md`。
 

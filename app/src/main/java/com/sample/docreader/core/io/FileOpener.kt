@@ -11,10 +11,27 @@ import java.io.InputStream
 interface FileOpener {
     /** 打开文档内容流。uri 形式由实现定义（asset:/// 或 content://）。 */
     fun open(uri: String): InputStream
+
+    /**
+     * 文件字节长度（M8b，用于 txt 分块加载的 editable 判定与进度参考）。
+     * 无法获知时返回 null（调用方按未知处理：先按可编辑，EOF 后按累计字节修正）。
+     */
+    fun length(uri: String): Long? = null
 }
 
 /** M3 开发期桩：从 debug assets 读取 fixtures。uri 形如 asset:///fixtures/sample_utf8.txt */
 class AssetsFileOpener(private val assets: AssetManager) : FileOpener {
     override fun open(uri: String): InputStream =
         assets.open(uri.removePrefix("asset:///"))
+
+    /** assets 长度：优先 openFd（未压缩 asset 直达）；压缩 asset 抛异常时回退流 available() */
+    override fun length(uri: String): Long? {
+        val path = uri.removePrefix("asset:///")
+        try {
+            return assets.openFd(path).use { it.length }
+        } catch (e: Exception) {
+            // 压缩 asset 无 fd，回退流式估算
+        }
+        return runCatching { open(uri).use { it.available().toLong() } }.getOrNull()
+    }
 }
