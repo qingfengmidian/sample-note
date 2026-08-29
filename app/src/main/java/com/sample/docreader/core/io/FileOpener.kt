@@ -23,4 +23,15 @@ interface FileOpener {
 class AssetsFileOpener(private val assets: AssetManager) : FileOpener {
     override fun open(uri: String): InputStream =
         assets.open(uri.removePrefix("asset:///"))
+
+    /** assets 长度：优先 openFd（未压缩 asset 直达）；压缩 asset 抛异常时回退流 available() */
+    override fun length(uri: String): Long? {
+        val path = uri.removePrefix("asset:///")
+        try {
+            return assets.openFd(path).use { it.length }
+        } catch (e: Exception) {
+            // 压缩 asset 无 fd，回退流式估算
+        }
+        return runCatching { open(uri).use { it.available().toLong() } }.getOrNull()
+    }
 }

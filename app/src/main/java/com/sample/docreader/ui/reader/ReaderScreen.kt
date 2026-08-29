@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -59,6 +60,7 @@ import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
+import com.sample.docreader.core.parse.PagedTextLoader
 import com.sample.docreader.core.progress.ProgressRepository
 import com.sample.docreader.core.recent.AppDatabase
 import com.sample.docreader.core.render.MarkdownParser
@@ -116,6 +118,7 @@ fun ReaderScreen(
         onNextChapter = { viewModel.selectChapter(state.chapterIndex + 1) },
         onFirstVisibleParagraphChanged = viewModel::onFirstVisibleParagraphChanged,
         onRestoreParagraphConsumed = viewModel::consumeRestoreParagraph,
+        onLoadMore = viewModel::loadMore,
         onEdit = onEdit
     )
 }
@@ -140,6 +143,7 @@ fun ReaderContent(
     onNextChapter: (() -> Unit)? = null,
     onFirstVisibleParagraphChanged: ((Int) -> Unit)? = null,
     onRestoreParagraphConsumed: (() -> Unit)? = null,
+    onLoadMore: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null
 ) {
     val settings = state.settings
@@ -179,6 +183,24 @@ fun ReaderContent(
             listState.scrollToItem(p)
             onRestoreParagraphConsumed?.invoke()
         }
+    }
+
+    // txt 分块加载（M8b，F4.2）：滚动至距底 PREFETCH_MARGIN 段内时预取下一块。
+    // distinctUntilChanged 避免重组/同索引重复触发；hasMore/loadingMore 经 rememberUpdatedState 取最新值。
+    val latestState by rememberUpdatedState(state)
+    val latestParagraphCount by rememberUpdatedState(paragraphs?.size ?: 0)
+    LaunchedEffect(listState, isTxt) {
+        if (!isTxt) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { lastVisible ->
+                val s = latestState
+                if (lastVisible >= 0 && s.hasMore && !s.loadingMore &&
+                    lastVisible >= latestParagraphCount - PagedTextLoader.PREFETCH_MARGIN
+                ) {
+                    onLoadMore?.invoke()
+                }
+            }
     }
 
     var chapterSheetOpen by remember { mutableStateOf(false) }
