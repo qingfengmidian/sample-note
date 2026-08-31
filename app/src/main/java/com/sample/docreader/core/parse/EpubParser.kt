@@ -54,7 +54,9 @@ class EpubParser : DocumentParser {
             // 3. 目录：优先 nav.xhtml，回退 NCX
             val toc = parseToc(entries, opf, base)
             val titleByPath = LinkedHashMap<String, TocEntry>() // 先出现的条目优先
-            for (t in toc) titleByPath.putIfAbsent(resolvePath(base, t.href), t)
+            // calibre 等生成器常在 toc href 后带锚点（如 "text/ch1.html#sec1"，Flatland.epub 实测），
+            // 剥离 #fragment 后才能与 spine/manifest 的 href 匹配，否则章节标题全部退化"第 N 章"（真机缺陷，2026-08-31）
+            for (t in toc) titleByPath.putIfAbsent(resolvePath(base, t.href.substringBefore('#')), t)
 
             val chapters = ArrayList<Chapter>(opf.spine.size)
             opf.spine.forEachIndexed { index, idref ->
@@ -257,7 +259,8 @@ class EpubParser : DocumentParser {
         stripTagsFallback(bytes)
     }
 
-    /** 遇 p/h1~h6/li/br 结束当前段落；丢弃标签与属性；忽略 img/script/style */
+    /** 遇 p/h1~h6/li/br 结束当前段落；丢弃标签与属性；忽略 img/script/style；
+     *  <head> 内的文本（title/style 等）不属于正文，整体跳过（真机缺陷，2026-08-31） */
     private fun extractWithPull(bytes: ByteArray, encoding: String?): List<String> {
         val parser = newPullParser()
         parser.setInput(bytes.inputStream(), encoding)
@@ -265,6 +268,7 @@ class EpubParser : DocumentParser {
         val sb = StringBuilder()
         var skipTag: String? = null // script/style 忽略中的标签名
         var skipDepth = 0
+        var headDepth = 0 // <head> 嵌套深度（head 内不入正文，防 <title>Cover</title> 泄漏）
 
         fun flush() {
             val s = sb.toString().trim()
@@ -277,7 +281,11 @@ class EpubParser : DocumentParser {
             when (event) {
                 XmlPullParser.START_TAG -> {
                     val tag = parser.name.lowercase()
-                    if (skipDepth > 0) {
+                    if (tag == "head") {
+                        headDepth++
+                    } else if (headDepth > 0) {
+                        // head 内其余标签一律忽略（含 style/script，不进 skipTag 逻辑）
+                    } else if (skipDepth > 0) {
                         if (tag == skipTag) skipDepth++
                     } else when (tag) {
                         "script", "style" -> {
@@ -288,10 +296,14 @@ class EpubParser : DocumentParser {
                         "br", "p", "li", "h1", "h2", "h3", "h4", "h5", "h6" -> flush()
                     }
                 }
-                XmlPullParser.TEXT -> if (skipDepth == 0) sb.append(parser.text)
+                XmlPullParser.TEXT -> if (headDepth == 0 && skipDepth == 0) sb.append(parser.text)
                 XmlPullParser.END_TAG -> {
                     val tag = parser.name.lowercase()
-                    if (skipDepth > 0) {
+                    if (tag == "head") {
+                        headDepth--
+                    } else if (headDepth > 0) {
+                        // head 内其余结束标签忽略
+                    } else if (skipDepth > 0) {
                         if (tag == skipTag) skipDepth--
                     } else if (tag == "p" || tag == "li" || tag == "h1" || tag == "h2" ||
                         tag == "h3" || tag == "h4" || tag == "h5" || tag == "h6"
@@ -306,9 +318,10 @@ class EpubParser : DocumentParser {
         return paragraphs
     }
 
-    /** 剥标签正则降级：仅在 XmlPullParserException/IOException 时触发 */
+    /** 剥标签正则降级：仅在 XmlPullParserException/IOException 时触发；head 一并剥除（同正文抽取契约） */
     private fun stripTagsFallback(bytes: ByteArray): List<String> {
         var text = bytes.toString(Charsets.UTF_8) // 宽松解码，乱码可接受
+        text = Regex("(?is)<head[^>]*>.*?</head>").replace(text, "")
         text = Regex("(?is)<(script|style)[^>]*>.*?</\\1>").replace(text, "")
         text = Regex("(?i)<img[^>]*>").replace(text, "")
         text = Regex("(?i)</?(?:p|li|h[1-6]|br)[^>]*>").replace(text, "\n")

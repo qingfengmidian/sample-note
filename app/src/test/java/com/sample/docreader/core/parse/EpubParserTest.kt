@@ -183,4 +183,116 @@ class EpubParserTest {
         job.join()
         assertTrue("取消后应抛出 CancellationException，实际 $caught", caught is kotlinx.coroutines.CancellationException)
     }
+
+    // ---------------- 真机回归（2026-08-31，Z-Library/calibre 系 epub 暴露的缺陷） ----------------
+
+    /**
+     * 真机缺陷 1（回归）：NCX/nav.xhtml 的 content href 带锚点（calibre 生成的书几乎都带 #fragment），
+     * 如 "text/ch1.html#sec1"。解析须剥离 #fragment 后与 spine/manifest 的 href 匹配，
+     * 否则章节标题全部退化为"第 N 章"（Flatland.epub 实测）。
+     */
+    @Test
+    fun ncxHrefWithFragment_stripsFragmentAndMatchesTitle() = runBlocking {
+        val doc = parser.parseBytes(
+            buildMinimalEpub(navHref = "text/ch1.html#sec1", navLabel = "真实标题"),
+            "fragment_href.epub"
+        )
+        assertEquals("带 #fragment 的 NCX href 应匹配到章节标题", "真实标题", doc.chapters[0].title)
+        assertEquals(1, doc.chapters.size)
+        assertTrue(doc.chapters[0].paragraphs.contains("正文第一段"))
+    }
+
+    /** 真机缺陷 1（epub3 侧）：nav.xhtml 的 <a href> 同样可能带 #fragment，须一并剥离 */
+    @Test
+    fun navHrefWithFragment_stripsFragmentAndMatchesTitle() = runBlocking {
+        val doc = parser.parseBytes(
+            buildMinimalEpub(
+                useNav = true,
+                navHref = "text/ch1.html#sec1",
+                navLabel = "NAV标题"
+            ),
+            "fragment_href_nav.epub"
+        )
+        assertEquals("带 #fragment 的 nav href 应匹配到章节标题", "NAV标题", doc.chapters[0].title)
+    }
+
+    /**
+     * 真机缺陷 2（回归）：<head> 内的 <title>/<style> 等文本不得泄漏进正文段落。
+     * 实测 Flatland.epub 封面页的 <title>Cover</title> 被抽成正文段"Cover"，
+     * 导致封面页显示伪内容（TC-UT-04 的"段落为去标签纯文本"契约的一部分）。
+     */
+    @Test
+    fun headTitle_notLeakedIntoParagraphs() {
+        val xhtml = """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <head><title>Cover</title><style type="text/css">.x { color: red; }</style></head>
+              <body>
+                <p>正文第一段</p>
+              </body>
+            </html>
+        """.trimIndent().toByteArray(Charsets.UTF_8)
+        val paragraphs = parser.extractParagraphs(xhtml)
+        assertTrue("正文段落应正常抽取", paragraphs.contains("正文第一段"))
+        assertFalse("head 内 <title> 文本不得泄漏", paragraphs.any { it.contains("Cover") })
+        assertFalse("head 内 <style> 内容不得泄漏", paragraphs.any { it.contains("color: red") })
+    }
+
+    /** 构造最小 epub2（container + opf + 导航 + 单章），供缺陷回归测试自包含使用（不依赖 fixture） */
+    private fun buildMinimalEpub(
+        navHref: String,
+        navLabel: String,
+        useNav: Boolean = false
+    ): ByteArray {
+        val container = """
+            <?xml version="1.0"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+            </container>
+        """.trimIndent()
+        val opf = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+              <manifest>
+                <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+                ${if (useNav) "<item id=\"nav\" href=\"text/nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>" else ""}
+                <item id="ch1" href="text/ch1.html" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine toc="ncx"><itemref idref="ch1"/></spine>
+            </package>
+        """.trimIndent()
+        val ncx = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+              <navMap>
+                <navPoint id="n1"><navLabel><text>$navLabel</text></navLabel><content src="$navHref"/></navPoint>
+              </navMap>
+            </ncx>
+        """.trimIndent()
+        val ch1 = """
+            <html xmlns="http://www.w3.org/1999/xhtml"><head><title>内页标题</title></head>
+            <body><p>正文第一段</p></body></html>
+        """.trimIndent()
+        val entries = linkedMapOf<String, ByteArray>(
+            "mimetype" to "application/epub+zip".toByteArray(),
+            "META-INF/container.xml" to container.toByteArray(),
+            "content.opf" to opf.toByteArray(),
+            if (useNav) "text/nav.xhtml" to
+                """
+                <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+                <head><title>nav</title></head>
+                <body><nav epub:type="toc"><ol><li><a href="$navHref">$navLabel</a></li></ol></nav></body></html>
+                """.trimIndent().toByteArray() else "toc.ncx" to ncx.toByteArray(),
+            "text/ch1.html" to ch1.toByteArray()
+        )
+        val bytes = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(bytes).use { zip ->
+            entries.forEach { (name, content) ->
+                zip.putNextEntry(java.util.zip.ZipEntry(name))
+                zip.write(content)
+                zip.closeEntry()
+            }
+        }
+        return bytes.toByteArray()
+    }
 }
