@@ -37,7 +37,7 @@ data class ReaderUiState(
     val error: String? = null,             // ParseException 差异化文案
     val chapterIndex: Int = 0,             // 当前章节索引（epub 多章）
     val restoreParagraph: Int? = null,     // 加载/切章后待滚动到的段落索引（一次性）
-    val editable: Boolean = true,          // 文件 ≤10MB 可编辑，超出只读（TC-F3-09，设计§8）
+    val editable: Boolean = true,          // 文件 ≤2MB 可编辑，超出只读（TC-F3-09，设计§8；真机验证 1.35MB 可编辑，5MB 触发 ANR）
     val hasMore: Boolean = false,          // txt 分块加载：还有未加载段落（M8b，F4.2）
     val loadingMore: Boolean = false       // txt 分块加载：正在追加下一块（防重入）
 )
@@ -283,7 +283,7 @@ class ReaderViewModel(
         val FONT_SIZE_STEPS = listOf(12, 14, 16, 18, 20, 22, 24)
         val LINE_HEIGHT_STEPS = listOf(120, 150, 180, 200)
 
-        /** 可编辑文件大小上限（设计§8：默认 10MB 可编辑，超出只读） */
-        const val MAX_EDITABLE_BYTES = 10 * 1024 * 1024
+        /** 可编辑文件大小上限（设计§8：默认 2MB 可编辑，超出只读；真机 5MB 编辑 ANR） */
+        const val MAX_EDITABLE_BYTES = 2 * 1024 * 1024
     }
 }

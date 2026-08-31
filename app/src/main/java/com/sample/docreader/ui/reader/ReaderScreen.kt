@@ -69,8 +69,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** 阅读界面（设计§4）：顶部栏（书名/章节名）+ 正文区 + 底部工具条 + epub 章节列表/翻章。 */
 
-/** 超大文件（>10MB）编辑入口置灰说明文字（TC-F3-09，设计§8） */
-const val EDIT_HINT_TOO_LARGE = "编辑（文件超过 10MB，仅可只读）"
+/** 超大文件（>2MB）编辑入口置灰说明文字（TC-F3-09，设计§8） */
+const val EDIT_HINT_TOO_LARGE = "编辑（文件超过 2MB，仅可只读）"
 
 @Composable
 fun ReaderScreen(
