@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -26,6 +26,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // v0.0.1 本地验证：暂无独立 release keystore，暂用 debug 签名出包（仅本机安装/验收，不外发）
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
