@@ -117,5 +117,5 @@ CI（GitHub Actions，`.github/workflows/ci.yml`）两个 job：
 - 功能分支从 `main` 拉出（`feat/mN-xxx`），PR 合入；合入前 CI 绿 + 至少一人 Approve。
 - 每个里程碑结束打 `mN` tag（spike 为 `s1`）。
 - 双智能体协作（Kimi Code 架构/审查 + OpenCode 实现）见 `docs/协同开发规范.md`；任务简报、审查记录与决策日志放 `docs/collab/`。
-- 当前进度（按 git 历史）：M0\~M6、S1、M7a（编辑器基础）、M7b（保存流程 + 超大文件只读）、M7c（草稿恢复 + 自动保存 + 新建文件）、M8（全局联调与非功能加固）、M9（验收回归，**v0.0.1 已发布**）全部完成。v0.0.1 范围 = 验收标准 1~7 + 全部 P0 用例；验收标准 8（md 目录 F2.13）与 9（epub 图片/CSS F2.14/15）已评审未实现，推迟到后续版本。release 构建注意：本机代理失效导致 `lintVitalRelease` 拉取失败，本地构建需 `-x lintVitalRelease`；release 暂用 debug keystore 签名，仅本机验证不外发。验收详情见 `docs/collab/reviews/m9-acceptance.md`。
+- 当前进度（按 git 历史）：M0\~M6、S1、M7a（编辑器基础）、M7b（保存流程 + 超大文件只读）、M7c（草稿恢复 + 自动保存 + 新建文件）、M8（全局联调与非功能加固）、M9（验收回归，**v0.0.1 已发布**）全部完成。v0.0.1 范围 = 验收标准 1~7 + 全部 P0 用例；验收标准 8（md 目录 F2.13）与 9（epub 图片/CSS F2.14/15）已评审未实现，推迟到后续版本。release 构建注意：本机代理失效导致 `lintVitalRelease` 拉取失败，本地构建需 `-x lintVitalRelease`；release 暂用 debug keystore 签名，仅本机验证不外发。验收详情见 `docs/collab/reviews/m9-acceptance.md`。**下一步 M10（阅读器 UI 改版，F4.4/F4.5）**：移除常驻底部工具条，设置收纳为 ⋮ 菜单→阅读设置底部面板，章节入口上移顶栏；设计定稿见 `docs/collab/reviews/m10-ui-refresh-design.md`。**M11（阅读富文本，F2.13 md 目录 + F2.14/F2.15 epub 图文/CSS）**：设计已就绪（软件设计文档 REV5/REV6，含 ContentBlock 块模型、CSS 合并规则、对比度回退），评审遗留 S1/S2/S4/S6/S7 随 M11 处置。
 

@@ -66,3 +66,5 @@
 5. **AGENTS.md**：实现阶段同步更新 epub 渲染描述（S14）。
 
 > 审查过程与原始输出：`opencode run`（2026-08-31，模型 k3-256k），本次只读，未修改任何文件。
+
+> **处置进展（2026-09-03，Kimi Code）**：文档修订已执行——需求说明书 REV6（S6/S7/S9）、软件设计文档 REV6（S1/S3/S4/S8/S9/S10/S11/S13）、测试用例 REV4（S2/S12 + M10 用例）、开发计划 M11（S5）。**设计定稿调整**：数据模型采用评审 S8 意见——图片挂所属段落 item 内（`ParagraphImage(paragraphIndex, …)`），不新增 LazyColumn 项，段落索引稳定；废弃初稿的独立 ContentBlock 块方案。剩余：S14（AGENTS.md epub 纯文本描述）随 M11 实现阶段更新。
