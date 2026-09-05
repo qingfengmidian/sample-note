@@ -46,7 +46,7 @@ UI 层 (Compose)  →  ViewModel 层 (StateFlow)  →  领域/数据层 (Parser/
 ```
 app/                        主 application 模块（namespace com.sample.docreader）
   src/main/java/com/sample/docreader/
-    MainActivity.kt         单 Activity，NavHost 路由（当前起点为 fixtures 入口，M4 将换 HomeScreen）
+    MainActivity.kt         单 Activity，NavHost 路由（起点 HomeScreen；另注册 ACTION_VIEW 外部打开意图）
     core/
       model/Models.kt       DocFormat / Document / Chapter / ReadingSettings / ReadingTheme / ParseException
       parse/                DocumentParser 接口 + ParserFactory + TxtParser / PlainTextParser / EpubParser
