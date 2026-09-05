@@ -156,6 +156,7 @@ class EditorViewModel(
     /**
      * 保存落盘（TC-UT-09/09a，设计§3.4）：非 dirty 空操作；
      * 文本按 UTF-8 写 cacheDir 临时文件并读回校验字节完整性 → `openOutput(uri, "wt")` 一次性写回；
+     * 临时文件写入/校验失败（C5）：防截断保证失效，直接 `saveResult = FailedSaveAs` 中止，不写回；
      * "wt" 抛 FileNotFoundException/UnsupportedOperationException 时回退 "w"；
      * 仍失败：保留临时文件、`saveResult = FailedSaveAs`、dirty 保持；
      * 异常消息含 "No content provider" 时 `saveResult = ProviderKilled`（S1 探针结论）。
@@ -175,11 +176,16 @@ class EditorViewModel(
             val text = content.text
             val bytes = text.toByteArray(Charsets.UTF_8)
             val tempFile = writeTempFile(text)
+            if (tempFile == null) {
+                // C5：临时文件写入/读回校验失败时防截断保证已失效，必须中止写回（不得直接落盘）
+                saveResult = SaveResult.FailedSaveAs
+                return@launch
+            }
             try {
                 writeBackWithFallback(writer, uri, bytes)
                 baseline = text
                 syncDerived()
-                tempFile?.delete()
+                tempFile.delete()
                 if (uri.isNotEmpty()) draftStore?.delete(uri) // 保存成功即清除草稿（TC-UT-09b）
                 saveResult = SaveResult.Success
             } catch (e: CancellationException) {

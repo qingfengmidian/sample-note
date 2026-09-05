@@ -16,6 +16,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -165,8 +166,8 @@ class ReaderViewModelTest {
     }
 
     /**
-     * 等待进度落库：persistProgress 经 viewModelScope 异步写 Room，轮询直至读到预期值。
-     * expected 为 null 时只推进调度器（用于断言"未写入"的场景）。
+     * 等待进度落库：persistProgress 经 viewModelScope 异步写 Room（滚动路径再防抖 500ms，G4-code），
+     * 轮询直至读到预期值。expected 为 null 时只推进调度器（用于断言"未写入"的场景）。
      */
     private fun TestScope.awaitProgress(
         progress: ProgressRepository, uri: String, chapter: Int, paragraph: Int
@@ -271,6 +272,29 @@ class ReaderViewModelTest {
         db.close()
     }
 
+    /** G4-code：滚动进度防抖——500ms 内连续变化不落库，停顿后只写最终值 */
+    @Test
+    fun progressPersist_debounced_writesLatestOnly() = runTest {
+        val (vm, progress, db) = newViewModelWithProgress(this)
+        vm.load("asset:///fixtures/sample.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+
+        vm.onFirstVisibleParagraphChanged(3)
+        advanceTimeBy(ReaderViewModel.PROGRESS_DEBOUNCE_MS - 100)
+        vm.onFirstVisibleParagraphChanged(7) // 重置防抖计时
+        advanceTimeBy(ReaderViewModel.PROGRESS_DEBOUNCE_MS - 100)
+        assertNull(
+            "防抖窗口内不应落库",
+            kotlinx.coroutines.runBlocking {
+                progress.progress("asset:///fixtures/sample.epub").first()
+            }
+        )
+
+        advanceTimeBy(200) // 越过 500ms 防抖窗口
+        awaitProgress(progress, "asset:///fixtures/sample.epub", chapter = 0, paragraph = 7)
+        db.close()
+    }
+
     /** TC-F2-18：未加载任何文件（currentUri 为空）时 persistProgress 不写入 */
     @Test
     fun persistProgress_withoutLoad_nothingSaved() = runTest {
@@ -337,8 +361,8 @@ class ReaderViewModelTest {
     }
 
     /**
-     * TC-F3-09（VM 侧，M7b 先行失败测试）：超过可编辑上限（设计§8，10 MB）的 txt 只读——
-     * `ReaderUiState.editable` 新增字段（默认 true），按加载字节数判定；UI 据此将编辑入口置灰并附说明。
+     * TC-F3-09（VM 侧）：超过可编辑上限（设计§8，2MB = ReaderViewModel.MAX_EDITABLE_BYTES）的 txt 只读——
+     * `ReaderUiState.editable` 按加载字节数判定；UI 据此将编辑入口置灰并附说明。
      */
     @Test
     fun tcF309_hugeFile_notEditable_normalFileEditable() = runTest {
@@ -346,7 +370,7 @@ class ReaderViewModelTest {
         bigVm.load("asset:///fixtures/huge.txt", DocFormat.TXT) // 15 MB fixture（TC-F3-09 指定）
         awaitLoaded(bigVm)
         assertEquals(null, bigVm.uiState.value.error)
-        assertFalse("15MB 超出 10MB 可编辑上限，应只读", bigVm.uiState.value.editable)
+        assertFalse("15MB 超出 2MB 可编辑上限，应只读", bigVm.uiState.value.editable)
 
         val (vm, _) = newViewModel(this)
         vm.load("asset:///fixtures/sample_utf8.txt", DocFormat.TXT)

@@ -61,17 +61,19 @@ class HomeViewModel(
 
     /**
      * 用户在系统文件选择器选中文件后调用（F1.1/F1.4）：
-     * 持久化读权限 → 读显示名/文件头 → 嗅探格式 → 记录最近 → 触发导航。
+     * 先读显示名/文件头嗅探格式（短读前 256 字节即可，无需持久权限）→ 不支持则直接提示返回、
+     * 不取持久授权（C6）；支持才持久化读权限 → 记录最近 → 触发导航。
      */
     fun onPicked(uri: Uri) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    takePersistableReadPermission(uri)
                     val displayName = queryDisplayName(uri)
                     val head = readHead(uri, HEAD_BYTES)
                     val format = FormatSniffer.sniff(displayName, head)
                         ?: throw UnsupportedFormatException(displayName)
+                    // 格式确认支持后才取持久授权；重复打开同一 uri 重复调用是幂等安全的
+                    takePersistableReadPermission(uri)
                     val name = displayName ?: uri.lastPathSegment ?: "未命名"
                     recentRepository.touch(uri.toString(), name, format)
                     _uiState.update {

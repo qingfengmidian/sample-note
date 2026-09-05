@@ -19,7 +19,10 @@ import com.sample.docreader.core.parse.TxtParser
 import com.sample.docreader.core.progress.ProgressRepository
 import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,11 +62,26 @@ class ReaderViewModel(
     private var currentUri: String = ""
     private var currentParagraph: Int = 0
 
+    /** G4-code：进度落库防抖——滚动期只记最新待写点，停顿 500ms 后一次性写 Room */
+    private data class ProgressPoint(val uri: String, val chapter: Int, val paragraph: Int)
+
+    private var pendingPoint: ProgressPoint? = null
+    private var progressJob: Job? = null
+
     /** txt 分块加载器（M8b）：仅分页路径持有；重新 load/onCleared 时关闭，防 fd 泄漏（TC-F4-08 同类） */
     private var pagedLoader: PagedTextLoader? = null
 
     override fun onCleared() {
         closePagedLoader()
+        // G4-code：兜底落库——防抖任务随 viewModelScope 取消，不能丢最后一段进度
+        val point = pendingPoint
+        pendingPoint = null
+        progressJob?.cancel()
+        val repo = progressRepository
+        if (point != null && repo != null) {
+            // viewModelScope 已取消，用一次性 IO 协程完成最后一次写入
+            CoroutineScope(Dispatchers.IO).launch { repo.save(point.uri, point.chapter, point.paragraph) }
+        }
     }
 
     private fun closePagedLoader() {
@@ -187,13 +205,14 @@ class ReaderViewModel(
         if (index !in document.chapters.indices) return
         currentParagraph = 0
         _uiState.update { it.copy(chapterIndex = index, restoreParagraph = 0) }
+        flushPendingProgress() // G4-code：切章前把未落盘的滚动进度兜底写一次
         persistProgress(index, 0)
     }
 
-    /** UI 滚动时上报首个可见段落索引，用于阅读进度恢复（F2.8） */
+    /** UI 滚动时上报首个可见段落索引，用于阅读进度恢复（F2.8）；落库经 500ms 防抖（G4-code） */
     fun onFirstVisibleParagraphChanged(paragraph: Int) {
         currentParagraph = paragraph.coerceAtLeast(0)
-        persistProgress(_uiState.value.chapterIndex, currentParagraph)
+        scheduleProgressPersist(_uiState.value.chapterIndex, currentParagraph)
     }
 
     /** UI 完成一次 restoreParagraph 滚动后调用，清除一次性目标 */
@@ -243,6 +262,28 @@ class ReaderViewModel(
         viewModelScope.launch { repo.save(currentUri, chapter, paragraph) }
     }
 
+    /** G4-code：滚动进度防抖落库——每段变化仅刷新待写点并重置计时，停顿 500ms 后写最新值 */
+    private fun scheduleProgressPersist(chapter: Int, paragraph: Int) {
+        val repo = progressRepository ?: return
+        if (currentUri.isEmpty()) return
+        val point = ProgressPoint(currentUri, chapter, paragraph)
+        pendingPoint = point
+        progressJob?.cancel()
+        progressJob = viewModelScope.launch {
+            delay(PROGRESS_DEBOUNCE_MS)
+            if (pendingPoint == point) pendingPoint = null
+            repo.save(point.uri, point.chapter, point.paragraph)
+        }
+    }
+
+    /** 兜底立即落库待写进度点（切章时调用；退出路径在 onCleared 单独处理，不能丢最后一段） */
+    private fun flushPendingProgress() {
+        val point = pendingPoint ?: return
+        pendingPoint = null
+        progressJob?.cancel()
+        viewModelScope.launch { progressRepository?.save(point.uri, point.chapter, point.paragraph) }
+    }
+
     /** 设置改动即时生效（先更新 StateFlow）并经 SettingsRepository 持久化（全局共享，F3.3） */
     fun updateSettings(transform: (ReadingSettings) -> ReadingSettings) {
         val newSettings = transform(_uiState.value.settings)
@@ -285,5 +326,8 @@ class ReaderViewModel(
 
         /** 可编辑文件大小上限（设计§8：默认 2MB 可编辑，超出只读；真机 5MB 编辑 ANR） */
         const val MAX_EDITABLE_BYTES = 2 * 1024 * 1024
+
+        /** 滚动进度落库防抖时长（G4-code）：停顿 500ms 后一次性写 Room */
+        const val PROGRESS_DEBOUNCE_MS = 500L
     }
 }

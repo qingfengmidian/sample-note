@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动器自适应图标底色（U1）：与 ui/Theme.kt 默认 lightColorScheme 主色一致的 Material 3 紫 -->
+    <color name="ic_launcher_background">#6750A4</color>
+</resources>

@@ -160,7 +160,8 @@ fun ReaderContent(
         if (isMd) MarkdownParser.parse(paragraphs.orEmpty()) else emptyList()
     }
 
-    var pendingParagraph by remember { mutableIntStateOf(-1) }
+    // rememberSaveable：旋转恰好发生在切换重组间隙时不丢位置保持目标（Int 可直接 saveable）
+    var pendingParagraph by rememberSaveable { mutableIntStateOf(-1) }
     LaunchedEffect(settings.wrapMode) {
         if (pendingParagraph >= 0) {
             listState.scrollToItem(pendingParagraph)
@@ -236,7 +237,7 @@ fun ReaderContent(
                             )
                         }
                         // 编辑入口仅 md/txt 显示（F3.1/F4.1：epub/xml 只读）；
-                        // 超出可编辑上限（>10MB）置灰并附说明，仅可只读浏览（TC-F3-09，设计§8）
+                        // 超出可编辑上限（>2MB，ReaderViewModel.MAX_EDITABLE_BYTES）置灰并附说明，仅可只读浏览（TC-F3-09，设计§8）
                         if (isMd || isTxt) {
                             DropdownMenuItem(
                                 text = { Text(if (state.editable) "编辑" else EDIT_HINT_TOO_LARGE) },

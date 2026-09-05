@@ -44,6 +44,7 @@ import java.io.OutputStream
  * - `save()`：写前校验 dirty（非 dirty 空操作）；文本按 UTF-8 先写 `cacheDir` 临时文件并校验字节完整性，
  *   再经 `DocumentWriter.openOutput(uri, "wt")` 一次性写回；"wt" 抛 FileNotFoundException/
  *   UnsupportedOperationException 时回退 "w" 重写；仍失败则保留临时文件（内容不丢）并报 `SaveResult.FailedSaveAs`
+ *   （C5：临时文件写入/校验失败时防截断保证失效，直接报 FailedSaveAs 中止，不写回）
  * - `saveResult: SaveResult?`：一次性结果事件，`SaveResult` 为 sealed：Success / FailedSaveAs / ProviderKilled
  *   （Provider 进程被 OEM 杀死抛 "No content provider" 时不按权限失效处理，S1 实测）
  */
@@ -229,10 +230,26 @@ class EditorViewModelTest {
         assertArrayEquals("临时文件应保住完整内容", "ab 重要内容".toByteArray(Charsets.UTF_8), temps[0].readBytes())
     }
 
+    /** C5：临时文件写入/校验失败（以 cacheDir 缺失模拟 writeTempFile 返回 null）→ 中止写回，不得落盘 */
+    @Test
+    fun tcUt09_tempFileUnavailable_abortsWriteback() = runTest(mainDispatcher) {
+        val writer = FakeDocumentWriter()
+        // cacheDir 缺省为 null → 无法建立临时文件，防截断保证失效
+        val vm = EditorViewModel("a", documentWriter = writer)
+        vm.onContentChange(TextFieldValue("ab"))
+
+        vm.save()
+        advanceUntilIdle()
+
+        assertTrue("临时文件不可用时不得写回", writer.modes.isEmpty())
+        assertNull(writer.writtenBytes)
+        assertTrue(vm.saveResult is SaveResult.FailedSaveAs)
+        assertTrue("保存未成功 dirty 应保持", vm.dirty)
+    }
+
     /** TC-UT-09（S1 探针结论）：Provider 进程被 OEM 杀死抛 "No content provider"，不按权限失效处理，单独提示 */
     @Test
-    fun tcUt09_providerKilled_specificResult() = runTest(mainDispatcher) {
-        val writer = FakeDocumentWriter(errorOn = {
+    fun tcUt09_providerKilled_specificResult() = runTest(mainDispatcher) {        val writer = FakeDocumentWriter(errorOn = {
             FileNotFoundException("No content provider: content://com.google.android.apps.docs.storage/x")
         })
         val vm = EditorViewModel("a", documentWriter = writer, cacheDir = tmpFolder.root)
