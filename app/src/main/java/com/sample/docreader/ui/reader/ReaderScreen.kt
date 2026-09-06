@@ -73,6 +73,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.sample.docreader.core.io.DelegatingFileOpener
+import com.sample.docreader.core.io.EpubCache
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
@@ -90,6 +91,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * 阅读界面（设计§4，M10 改版 F4.4/F4.5）：
@@ -125,7 +127,9 @@ fun ReaderScreen(
             ReaderViewModel(
                 DelegatingFileOpener(context),
                 SettingsRepository(context),
-                ProgressRepository(AppDatabase.get(context.applicationContext))
+                ProgressRepository(AppDatabase.get(context.applicationContext)),
+                // M11b（F2.14）：epub 解压缓存目录（应用私有 cache/epub/，见设计 §3.2-5）
+                EpubCache(File(context.cacheDir, "epub"))
             )
         }
     })
@@ -446,14 +450,24 @@ fun ReaderContent(
                 // 加载中：document 为 null 且无错误（避免 0 章 epub 误判为加载中而永久转圈）
                 state.loading || state.document == null ->
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                // TC-F2-24：空文件/空章节（0 字节、全空段落或 epub 空 spine）显示空态提示
-                paragraphs == null || paragraphs.isEmpty() || paragraphs.all { it.isBlank() } -> Text(
+                // TC-F2-24：空文件/空章节（0 字节、全空段落或 epub 空 spine）显示空态提示。
+                // M3：某章 images 非空（纯图章，解析层已合成空宿主段落）时不得判空——需渲染图片；
+                // 真正无图真空章仍走既有空态（TC-F2-24 不回归）。
+                (paragraphs.isNullOrEmpty() || paragraphs.all { it.isBlank() }) &&
+                    chapter?.images.isNullOrEmpty() != false -> Text(
                     "文件为空",
                     color = theme.foreground,
                     modifier = Modifier.align(Alignment.Center)
                 )
                 isMd && mdPreview -> MarkdownPreview(mdBlocks, settings, listState, theme)
-                else -> ReaderTextView(paragraphs, settings, listState)
+                else -> ReaderTextView(
+                    paragraphs.orEmpty(),
+                    settings,
+                    listState,
+                    // F2.14：epub 章节图片挂段落 item 内渲染；图片文件根 = epub 解压缓存目录（imageRoot）
+                    images = chapter?.images.orEmpty(),
+                    imageRoot = state.document?.imageRoot
+                )
             }
         }
     }

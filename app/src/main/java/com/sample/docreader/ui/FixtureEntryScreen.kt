@@ -18,15 +18,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 /**
- * M3 极简 fixtures 选择入口：列出 debug assets fixtures 中的 txt/md/xml，点击进入阅读界面。
- * M4 由 HomeScreen（最近列表 + SAF 打开）替换本入口；epub 阅读为 M5，此处不列出。
+ * M3 极简 fixtures 选择入口：列出 debug assets fixtures 中的 txt/md/xml/epub，点击进入阅读界面。
+ * M4 由 HomeScreen（最近列表 + SAF 打开）替换主入口；本入口保留用于开发/测试样本走查
+ * （M11b 起收录 epub 含图样本，供设备端 MdImageDeviceTest 验收 TC-F2-17/17c/17d）。
  */
 @Composable
 fun FixtureEntryScreen(onOpenFixture: (String) -> Unit, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     val fixtures = remember {
         context.assets.list("fixtures").orEmpty()
-            .filter { it.endsWith(".txt") || it.endsWith(".md") || it.endsWith(".xml") }
+            .filter {
+                it.endsWith(".txt") || it.endsWith(".md") ||
+                    it.endsWith(".xml") || it.endsWith(".epub")
+            }
             .sorted()
     }
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {

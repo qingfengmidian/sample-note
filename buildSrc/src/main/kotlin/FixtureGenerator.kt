@@ -258,6 +258,145 @@ object FixtureGenerator {
         epub(dir, "malformed.epub",
             opf(listOf("ch1.xhtml" to ""), ncx = false, nav = false),
             emptyMap())
+
+        // M11 新增（F2.14/TC-F2-17/17c/17d）：含图 epub 三件套（图片用程序生成的小位图，评审 S2/S12）
+        imageEpubFixtures(dir)
+    }
+
+    // ---------------- M11 含图 epub 夹具（F2.14） ----------------
+
+    /** 程序生成 PNG/JPEG 位图：纯色底 + 白色对角叉线，便于肉眼/截图区分（ImageIO 纯软件编码，无显示依赖） */
+    private fun pngBytes(width: Int, height: Int, rgb: Int): ByteArray {
+        val img = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = java.awt.Color(rgb)
+        g.fillRect(0, 0, width, height)
+        g.color = java.awt.Color.WHITE
+        g.drawLine(0, 0, width - 1, height - 1)
+        g.drawLine(0, height - 1, width - 1, 0)
+        g.dispose()
+        val out = java.io.ByteArrayOutputStream()
+        javax.imageio.ImageIO.write(img, "png", out)
+        return out.toByteArray()
+    }
+
+    private fun jpgBytes(width: Int, height: Int, rgb: Int): ByteArray {
+        val img = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.color = java.awt.Color(rgb)
+        g.fillRect(0, 0, width, height)
+        g.color = java.awt.Color.WHITE
+        g.drawLine(width / 2, 0, width / 2, height - 1)
+        g.dispose()
+        val out = java.io.ByteArrayOutputStream()
+        javax.imageio.ImageIO.write(img, "jpg", out)
+        return out.toByteArray()
+    }
+
+    /** svg 夹具（纯矢量，渲染层须给占位，不做任何 CSS/矢量解析） */
+    private val svgFixture = """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="24" fill="#888"/></svg>"""
+
+    private fun imageEpubFixtures(dir: File) {
+        val png = pngBytes(480, 320, 0xCC3333)   // 暗红底（正文按屏宽等比显示，位图留足分辨率不过糊）
+        val jpg = jpgBytes(480, 320, 0x339933)   // 绿底
+        val svg = svgFixture
+        val spacedPng = pngBytes(480, 320, 0x9966CC) // 文件名含空格（src 经 %20 编码，验证渲染层 URL 解码查找）
+
+        // 1) sample_images.epub（TC-F2-17）：正文含 png/jpg 位图各一（带 alt）+ 一张 svg（无 alt）
+        //    + 一张文件名含空格、src 用 %20 编码的位图（L3 覆盖）。
+        //    布局刻意覆盖多种 img 语义：独立 img（块级）挂前一段、段落文字内 img 归所在段、尾随独立 svg/位图。
+        //    各段落索引 → [0]图注段 [1]内联图段 [2]尾段；图归属 0 / 1 / 1 / 1。
+        //    显式 zip 目录条目 "OEBPS/"（zip -r 常见形态，I1 覆盖：缓存解压须跳过目录条目而非当文件写）。
+        epub(dir, "sample_images.epub",
+            opf = """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                |<metadata><dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/" id="id">fixture-imgs</dc:identifier>
+                |<dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">images</dc:title>
+                |<dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">zh</dc:language></metadata>
+                |<manifest>
+                |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="fig1" href="images/fig1.png" media-type="image/png"/>
+                |<item id="fig2" href="images/fig2.jpg" media-type="image/jpeg"/>
+                |<item id="fig3" href="images/fig.svg" media-type="image/svg+xml"/>
+                |</manifest>
+                |<spine><itemref idref="ch1"/></spine>
+                |</package>
+                |""".trimMargin(),
+            files = linkedMapOf<String, Any>(
+                "ch1.xhtml" to """
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>images</title></head>
+                    |<body>
+                    |<p>第一段：前言文字。</p>
+                    |<img src="images/fig1.png" alt="示例PNG插图"/>
+                    |<p>第二段开头。<img src="images/fig2.jpg" alt="示例JPG插图"/>第二段结尾。</p>
+                    |<img src="images/fig.svg"/>
+                    |<img src="images/with%20space.png" alt="空格文件名图"/>
+                    |<p>尾段文字。</p>
+                    |</body></html>
+                    |""".trimMargin(),
+                "images/fig1.png" to png,
+                "images/fig2.jpg" to jpg,
+                "images/fig.svg" to svg,
+                "images/with space.png" to spacedPng
+            ),
+            directories = setOf("OEBPS/"))
+
+        // 2) sample_cover.epub（TC-F2-17c）：OPF <meta name="cover" content="cover-img"> 指向位图封面。
+        //    封面不出现在正文，靠解析 OPF 声明挂到 chapter[0].images 首条（isCover, paragraphIndex=0）。
+        epub(dir, "sample_cover.epub",
+            opf = """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                |<metadata><dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/" id="id">fixture-cover</dc:identifier>
+                |<dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">cover</dc:title>
+                |<dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">zh</dc:language>
+                |<meta name="cover" content="cover-img"/></metadata>
+                |<manifest>
+                |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="cover-img" href="images/cover.png" media-type="image/png"/>
+                |</manifest>
+                |<spine><itemref idref="ch1"/></spine>
+                |</package>
+                |""".trimMargin(),
+            files = linkedMapOf<String, Any>(
+                "ch1.xhtml" to """
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>cover</title></head>
+                    |<body><p>封面之后的第一段文字。</p><p>第二段文字。</p></body></html>
+                    |""".trimMargin(),
+                "images/cover.png" to pngBytes(480, 640, 0x3366CC)
+            ))
+
+        // 3) broken_image.epub（TC-F2-17d）：img 引用 zip 中不存在的条目（带 alt）+ 一张截断位图（无 alt）。
+        //    lost.png 不出现在 files（缺失条目）；broken.png 为**头部损坏**的 PNG——前半段截断不足以让
+        //    BitmapFactory 必失败（实测可返回部分位图），改清零前 24 字节（签名+IHDR 头）保证解码必返 null。
+        val brokenPng = pngBytes(96, 64, 0x666666).also { java.util.Arrays.fill(it, 0, 24, 0) }
+        epub(dir, "broken_image.epub",
+            opf = """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                |<metadata><dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/" id="id">fixture-broken</dc:identifier>
+                |<dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">broken</dc:title>
+                |<dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">zh</dc:language></metadata>
+                |<manifest>
+                |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="broken" href="images/broken.png" media-type="image/png"/>
+                |</manifest>
+                |<spine><itemref idref="ch1"/></spine>
+                |</package>
+                |""".trimMargin(),
+            files = linkedMapOf<String, Any>(
+                "ch1.xhtml" to """
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>broken</title></head>
+                    |<body>
+                    |<p>正文仍在的首段。</p>
+                    |<img src="images/lost.png" alt="失联配图"/>
+                    |<img src="images/broken.png"/>
+                    |<p>正文结尾段。</p>
+                    |</body></html>
+                    |""".trimMargin(),
+                "images/broken.png" to brokenPng
+            ))
     }
 
     private fun xhtml(title: String, body: String, encoding: String = "UTF-8") = """
@@ -304,7 +443,7 @@ object FixtureGenerator {
         |</html>
         |""".trimMargin()
 
-    private fun epub(dir: File, name: String, opf: String?, files: Map<String, Any>) {
+    private fun epub(dir: File, name: String, opf: String?, files: Map<String, Any>, directories: Set<String> = emptySet()) {
         File(dir, name).outputStream().use { fos ->
             ZipOutputStream(fos).use { zip ->
                 // mimetype 必须第一个且不压缩（STORED 需预先设置 size/crc）
@@ -330,6 +469,13 @@ object FixtureGenerator {
                 if (opf != null) {
                     zip.putNextEntry(ZipEntry("OEBPS/content.opf"))
                     zip.write(opf.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+
+                // 显式 zip 目录条目（如 "OEBPS/"）：zip -r 打包 epub 的常见形态，I1 需覆盖
+                directories.forEach { d ->
+                    val dirEntry = if (d.endsWith('/')) d else "$d/"
+                    zip.putNextEntry(ZipEntry(dirEntry))
                     zip.closeEntry()
                 }
 
@@ -421,7 +567,8 @@ object FixtureGenerator {
 
         listOf("sample.epub", "sample3.epub", "hybrid.epub", "many_chapters.epub",
             "nested_toc.epub", "mixed_encoding.epub", "bad_decl.epub", "broken.epub", "no_nav.epub",
-            "malformed.epub", "nested_nav.epub", "bad_spine.epub")
+            "malformed.epub", "nested_nav.epub", "bad_spine.epub",
+            "sample_images.epub", "sample_cover.epub", "broken_image.epub")
             .forEach { name ->
                 val e = entries(name)
                 check(e["mimetype"]?.toString(Charsets.US_ASCII) == "application/epub+zip",
@@ -476,6 +623,37 @@ object FixtureGenerator {
         val badSpine = entries("bad_spine.epub")["OEBPS/content.opf"]?.toString(Charsets.UTF_8) ?: ""
         check(badSpine.contains("""idref="ghost"""") && !badSpine.contains("""id="ghost""""),
             "bad_spine.epub 的 spine 应引用 manifest 中不存在的 idref=ghost")
+
+        // M11 含图夹具（F2.14/TC-F2-17/17c/17d）：图片媒体类型、章节内 img 语义、缺失/截断条目
+        val sampleImagesEntries = entries("sample_images.epub")
+        val sampleImagesOpf = sampleImagesEntries["OEBPS/content.opf"]?.toString(Charsets.UTF_8) ?: ""
+        check(sampleImagesOpf.contains("media-type=\"image/png\"") &&
+            sampleImagesOpf.contains("media-type=\"image/jpeg\"") &&
+            sampleImagesOpf.contains("media-type=\"image/svg+xml\""),
+            "sample_images.epub 的 manifest 应声明 png/jpg/svg 图片条目")
+        val sampleImagesCh = sampleImagesEntries["OEBPS/ch1.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(Regex("""<img[^>]*alt="示例PNG插图"""").containsMatchIn(sampleImagesCh) &&
+            Regex("""<img[^>]*alt="示例JPG插图"""").containsMatchIn(sampleImagesCh),
+            "sample_images.epub 的位图 img 应带 alt")
+        check(sampleImagesEntries.containsKey("OEBPS/"),
+            "sample_images.epub 应含显式 zip 目录条目 OEBPS/（I1 覆盖）")
+        check(sampleImagesEntries.containsKey("OEBPS/images/with space.png") &&
+            sampleImagesCh.contains("images/with%20space.png"),
+            "sample_images.epub 应含文件名含空格、src 以 %20 编码的位图（L3 覆盖）")
+
+        val coverOpf = entries("sample_cover.epub")["OEBPS/content.opf"]?.toString(Charsets.UTF_8) ?: ""
+        check(coverOpf.contains("""<meta name="cover" content="cover-img"/>""") &&
+            coverOpf.contains("href=\"images/cover.png\""),
+            "sample_cover.epub 应含 meta name=cover 指向位图封面")
+
+        val broken = entries("broken_image.epub")
+        check(!broken.containsKey("OEBPS/images/lost.png"),
+            "broken_image.epub 应缺失 lost.png 条目")
+        val fullPngBytes = pngBytes(96, 64, 0x666666).size
+        val brokenPngBytes = broken.getValue("OEBPS/images/broken.png")
+        check(brokenPngBytes.size == fullPngBytes &&
+            brokenPngBytes.copyOfRange(0, 24).all { it == 0.toByte() },
+            "broken_image.epub 的 broken.png 应为头部清零的损坏 PNG（体积不变、前 24 字节全 0，保证 BitmapFactory 解码必失败）")
     }
 }
 

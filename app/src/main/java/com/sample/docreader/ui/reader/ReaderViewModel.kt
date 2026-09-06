@@ -2,6 +2,7 @@ package com.sample.docreader.ui.reader
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sample.docreader.core.io.EpubCache
 import com.sample.docreader.core.io.FileOpener
 import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileNotFoundException
@@ -56,7 +58,8 @@ data class ReaderUiState(
 class ReaderViewModel(
     private val fileOpener: FileOpener,
     private val settingsRepository: SettingsRepository,
-    private val progressRepository: ProgressRepository? = null
+    private val progressRepository: ProgressRepository? = null,
+    private val epubCache: EpubCache? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -112,11 +115,9 @@ class ReaderViewModel(
                     loadTxtPaged(uri, displayName)
                     return@launch
                 }
-                val bytes = fileOpener.open(uri).use { it.readBytes() }
                 val name = displayName?.takeIf { it.isNotBlank() } ?: uri.substringAfterLast('/')
-                val document = parseBytes(bytes, name, uri, format)
+                val (document, editable) = loadNonTxt(uri, name, format)
                 currentUri = uri
-                val editable = bytes.size <= MAX_EDITABLE_BYTES
                 val restored = progressRepository?.progress(uri)?.first()
                 val chapterIndex = restored?.chapter
                     ?.coerceIn(0, (document.chapters.size - 1).coerceAtLeast(0)) ?: 0
@@ -151,6 +152,54 @@ class ReaderViewModel(
                 // 文件读不到（被移动/删除等）统一按无权限提示
                 _uiState.update { it.copy(loading = false, error = ParseException.NoPermission().message) }
             }
+        }
+    }
+
+    /**
+     * md/xml/epub 全量加载：读字节 → 解析。M11b（F2.14）epub 优先走缓存解压——
+     * 解压到应用私有缓存并从缓存目录解析（`parseFromDir`，正文不整书驻留内存，图片可懒加载）；
+     * 缓存目录解析失败（部分条目丢失/损坏）时**删除目录并重新解压一次**，仍失败回退整书字节解析；
+     * 缓存未接入（单测）/首次解压失败回退整书字节解析，图片按占位处理，不阻塞阅读。
+     */
+    private suspend fun loadNonTxt(uri: String, name: String, format: DocFormat): Pair<Document, Boolean> {
+        if (format == DocFormat.EPUB) {
+            val cache = epubCache
+            if (cache != null) {
+                val parser = ParserFactory.forFormat(DocFormat.EPUB)
+                val dir = runCatchingExtract(cache, uri)
+                if (dir != null && parser is EpubParser) {
+                    try {
+                        // epub 只读（编辑入口仅 md/txt），缓存路径无需字节体积判定 editable
+                        return parser.parseFromDir(dir, uri, name) to false
+                    } catch (e: ParseException) {
+                        // M1（评审）：缓存目录不完整/损坏（container.xml 在但部分条目缺失）→ 删除并重抽一次
+                        val retryDir = runCatchingExtract(cache, uri, force = true)
+                        if (retryDir != null) {
+                            try {
+                                return parser.parseFromDir(retryDir, uri, name) to false
+                            } catch (e2: ParseException) {
+                                // 重抽后仍失败：真实结构问题，回退整书字节解析（给出差异化的原始错误）
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 整书字节读取属 IO，移到 Dispatchers.IO（L4，评审）；解析本身内部即 IO 调度
+        val bytes = withContext(Dispatchers.IO) { fileOpener.open(uri).use { it.readBytes() } }
+        return parseBytes(bytes, name, uri, format) to (bytes.size <= MAX_EDITABLE_BYTES)
+    }
+
+    /** 缓存解压辅助：正常提取，或 force=true 时先删除旧目录再重抽一次；取消透传，其余失败回 null */
+    private suspend fun runCatchingExtract(cache: EpubCache, uri: String, force: Boolean = false): File? {
+        if (force) cache.delete(uri)
+        return try {
+            // runInterruptible：协程取消会中断工作线程，缓存解压段级检查及时止损并清理半成品（C4）
+            runInterruptible(Dispatchers.IO) { cache.extract(uri, input = { fileOpener.open(uri) }) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null // 缓存失败：回退整书字节解析（图片不可用走占位）
         }
     }
 

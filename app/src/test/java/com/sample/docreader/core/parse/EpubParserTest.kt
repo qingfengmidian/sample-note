@@ -2,17 +2,23 @@ package com.sample.docreader.core.parse
 
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ParseException
+import com.sample.docreader.core.model.ParagraphImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 /**
  * M2：EpubParser（《测试用例》TC-UT-04/04a/04b/04c/04d/05/06/06a/06b/13）。
@@ -22,6 +28,9 @@ import org.robolectric.RobolectricTestRunner
 class EpubParserTest {
 
     private val parser = EpubParser()
+
+    @get:Rule
+    val tmpFolder = TemporaryFolder()
 
     /** TC-UT-04：epub2 sample.epub → 章节顺序 = spine；标题 = NCX navLabel；段落为去标签纯文本 */
     @Test
@@ -236,6 +245,275 @@ class EpubParserTest {
         assertFalse("head 内 <title> 文本不得泄漏", paragraphs.any { it.contains("Cover") })
         assertFalse("head 内 <style> 内容不得泄漏", paragraphs.any { it.contains("color: red") })
     }
+
+    // ---------------- M11（F2.14）图片/封面解析（TC-F2-17/17c/17d，测试用例 REV4 §0 含图夹具） ----------------
+
+    /** sample_images.epub：块级 img 挂前一段、行内 img 归所在段、svg/带空格文件名图保留；正文文本不含 img 残留 */
+    @Test
+    fun m11_images_blockInlineSvgExtracted() = runBlocking {
+        val doc = parser.parseBytes(Fixtures.bytes("sample_images.epub"), "sample_images.epub")
+        val ch = doc.chapters[0]
+        // 图归属：PNG（块级，紧随段 0 之后）→ 0；JPG（第二段文字内行内）→ 1；svg（尾随）→ 1；空格文件名图（尾随）→ 1
+        assertEquals(listOf(0, 1, 1, 1), ch.images.map { it.paragraphIndex })
+        assertEquals(4, ch.images.size)
+
+        val png = ch.images[0]
+        assertEquals("示例PNG插图", png.alt)
+        assertFalse(png.isCover)
+        assertTrue("src 应为 manifest 规范化 zip 路径", png.src.endsWith("OEBPS/images/fig1.png"))
+
+        val jpg = ch.images[1]
+        assertEquals("示例JPG插图", jpg.alt)
+        assertTrue(jpg.src.endsWith("OEBPS/images/fig2.jpg"))
+
+        val svg = ch.images[2]
+        assertNull(svg.alt)
+        assertTrue("svg 仅保留 src 由渲染层占位", svg.src.endsWith("OEBPS/images/fig.svg"))
+
+        // L3：src 百分号编码保留在解析路径中（渲染层查找时再 URLDecoder）
+        val spaced = ch.images[3]
+        assertEquals("空格文件名图", spaced.alt)
+        assertEquals("OEBPS/images/with%20space.png", spaced.src)
+
+        assertTrue(ch.paragraphs.contains("第一段：前言文字。"))
+        assertTrue(ch.paragraphs.contains("第二段开头。第二段结尾。"))
+        assertTrue(ch.paragraphs.contains("尾段文字。"))
+        assertFalse("段落应为纯文本，不含 img/src 残留", ch.paragraphs.any { it.contains("fig") || it.contains('<') })
+    }
+
+    /** sample_cover.epub：OPF <meta name="cover"> 指向位图 → isCover 挂首章段落 0，正文文字不含封面 */
+    @Test
+    fun m11_cover_metaNameCover() = runBlocking {
+        val doc = parser.parseBytes(Fixtures.bytes("sample_cover.epub"), "sample_cover.epub")
+        val ch = doc.chapters[0]
+        assertEquals(1, ch.images.size)
+        val cover = ch.images[0]
+        assertTrue(cover.isCover)
+        assertEquals(0, cover.paragraphIndex)
+        assertEquals("OEBPS/images/cover.png", cover.src)
+        assertNull(cover.alt)
+        assertEquals("封面不占用正文段落", listOf("封面之后的第一段文字。", "第二段文字。"), ch.paragraphs)
+    }
+
+    /** 封面识别 2：manifest item properties="cover-image"（epub3 形态） */
+    @Test
+    fun m11_cover_propertiesCoverImage() = runBlocking {
+        val bytes = buildRawEpub(
+            opf = """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                |<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+                |<manifest>
+                |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="cv" href="images/c.png" media-type="image/png" properties="cover-image"/>
+                |</manifest>
+                |<spine><itemref idref="ch1"/></spine>
+                |</package>
+                |""".trimMargin(),
+            files = mapOf(
+                "OEBPS/ch1.xhtml" to minimalChapter("<p>正文。</p>"),
+                "OEBPS/images/c.png" to byteArrayOf(0x01)
+            )
+        )
+        val ch = parser.parseBytes(bytes, "prop_cover.epub").chapters[0]
+        assertEquals(1, ch.images.size)
+        assertTrue(ch.images[0].isCover)
+        assertEquals("OEBPS/images/c.png", ch.images[0].src)
+    }
+
+    /** svg 封面内嵌位图引用 → 提取内嵌位图路径作封面；纯矢量 svg（无 <image>）→ 不提取封面 */
+    @Test
+    fun m11_cover_svgInnerBitmapExtractedButPureVectorNot() = runBlocking {
+        val chWithInner = parser.parseBytes(
+            buildRawEpub(
+                opf = """
+                    |<?xml version="1.0" encoding="UTF-8"?>
+                    |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                    |<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title>
+                    |<meta name="cover" content="cv"/></metadata>
+                    |<manifest>
+                    |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                    |<item id="cv" href="images/cover.svg" media-type="image/svg+xml"/>
+                    |</manifest>
+                    |<spine><itemref idref="ch1"/></spine>
+                    |</package>
+                    |""".trimMargin(),
+                files = mapOf(
+                    "OEBPS/ch1.xhtml" to minimalChapter("<p>正文。</p>"),
+                    "OEBPS/images/cover.svg" to
+                        ("""<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">""" +
+                            """<image xlink:href="cover.png" width="300" height="400"/></svg>""").toByteArray(),
+                    "OEBPS/images/cover.png" to byteArrayOf(0x02)
+                )
+            ),
+            "svg_cover_inner.epub"
+        ).chapters[0]
+        assertEquals("内嵌位图封面应提取为 isCover，src 指向位图", 1, chWithInner.images.size)
+        val inner = chWithInner.images[0]
+        assertTrue(inner.isCover)
+        assertEquals("OEBPS/images/cover.png", inner.src)
+
+        val chPureVector = parser.parseBytes(
+            buildRawEpub(
+                opf = """
+                    |<?xml version="1.0" encoding="UTF-8"?>
+                    |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                    |<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title>
+                    |<meta name="cover" content="cv"/></metadata>
+                    |<manifest>
+                    |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                    |<item id="cv" href="images/cover.svg" media-type="image/svg+xml"/>
+                    |</manifest>
+                    |<spine><itemref idref="ch1"/></spine>
+                    |</package>
+                    |""".trimMargin(),
+                files = mapOf(
+                    "OEBPS/ch1.xhtml" to minimalChapter("<p>正文。</p>"),
+                    "OEBPS/images/cover.svg" to
+                        """<svg xmlns="http://www.w3.org/2000/svg"><rect width="300" height="400"/></svg>""".toByteArray()
+                )
+            ),
+            "svg_cover_pure.epub"
+        ).chapters[0]
+        assertTrue("纯矢量 svg 封面不提取", chPureVector.images.isEmpty())
+    }
+
+    /** broken_image.epub：缺失条目与截断位图都提取为 ParagraphImage（渲染层占位），正文文本完整 */
+    @Test
+    fun m11_brokenImage_stillParsedAndTextIntact() = runBlocking {
+        val doc = parser.parseBytes(Fixtures.bytes("broken_image.epub"), "broken_image.epub")
+        val ch = doc.chapters[0]
+        assertEquals(2, ch.images.size)
+        val lost = ch.images[0]
+        assertTrue(lost.src.endsWith("OEBPS/images/lost.png"))
+        assertEquals("失联配图", lost.alt)
+        assertNull(ch.images[1].alt)
+        assertTrue(ch.paragraphs.contains("正文仍在的首段。"))
+        assertTrue(ch.paragraphs.contains("正文结尾段。"))
+    }
+
+    /** 无图 epub：images 恒空（mixed_encoding 单章无图；no_nav/sample 等复用基础章节含图，不适合此断言） */
+    @Test
+    fun m11_noImageEpub_imagesEmpty() = runBlocking {
+        val doc = parser.parseBytes(Fixtures.bytes("mixed_encoding.epub"), "mixed_encoding.epub")
+        assertTrue(doc.chapters.all { it.images.isEmpty() })
+        assertTrue(doc.chapters[0].paragraphs.isNotEmpty())
+    }
+
+    /** M3：整章纯图（图版/扉页，无文本段落）→ 合成空字符串宿主段落承载图片，不判空 */
+    @Test
+    fun m3_pureImageChapter_hostParagraphSynthesized() = runBlocking {
+        val bytes = buildRawEpub(
+            opf = """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                |<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+                |<manifest>
+                |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="p" href="images/plate.png" media-type="image/png"/>
+                |</manifest>
+                |<spine><itemref idref="ch1"/></spine>
+                |</package>
+                |""".trimMargin(),
+            files = mapOf(
+                "OEBPS/ch1.xhtml" to minimalChapter("""<p><img src="images/plate.png" alt="图版页"/></p>"""),
+                "OEBPS/images/plate.png" to byteArrayOf(0x03)
+            )
+        )
+        val ch = parser.parseBytes(bytes, "plate.epub").chapters[0]
+        assertEquals("纯图章应合成一条空宿主段落承载图片", listOf(""), ch.paragraphs)
+        assertEquals(1, ch.images.size)
+        assertEquals(0, ch.images[0].paragraphIndex)
+        assertTrue(ch.images[0].src.endsWith("OEBPS/images/plate.png"))
+    }
+
+    /** I2：读侧 zip-slip——container full-path 逃逸到缓存目录外时拒绝读取（按缺失 → MissingOpf），不泄露外部文件 */
+    @Test
+    fun i2_readSideEscape_rejectedAsMissing() {
+        val cacheDir = tmpFolder.newFolder("cache")
+        File(cacheDir, "META-INF").mkdirs()
+        File(cacheDir, "META-INF/container.xml").writeText("""
+            <?xml version="1.0"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="../secret.opf" media-type="application/oebps-package+xml"/></rootfiles>
+            </container>
+        """.trimIndent())
+        // 若未做读侧校验，../secret.opf 会被读出并按 OPF 解析（manifest 引用缺失章节 → MalformedContent）
+        File(cacheDir.parentFile, "secret.opf").writeText("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
+            <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+            <manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest>
+            <spine><itemref idref="ch1"/></spine>
+            </package>
+        """.trimIndent())
+        runBlocking {
+            try {
+                parser.parseFromDir(cacheDir, "escape://x", "escape.epub")
+                fail("逃逸路径应被拒绝并抛 MissingOpf")
+            } catch (e: ParseException.MissingOpf) {
+                // 预期：read 返回 null（拒绝越界），OPF 视为缺失
+            } catch (e: ParseException.MalformedContent) {
+                fail("读侧 zip-slip 防护失效：越界 OPF 被读出解析（应拒绝为缺失）")
+            }
+        }
+    }
+
+    /**
+     * C4（一致性评审 §5）：XHTML 抽取循环为段级，超大单章须响应取消。
+     * 阻塞式同步解析不主动让出协程，取消靠段级 cancelCheck 及时止损（生产默认为线程中断，
+     * 经 runInterruptible 由协程取消触发）；注入确定性 cancelCheck 断言"解析中途即抛、而非跑完整章"。
+     */
+    @Test
+    fun c4_interruptMidChapter_throwsCancellation() {
+        val bigBody = buildString {
+            repeat(20_000) { append("<p>第 $it 段取消粒度测试文字。</p>") }
+        }
+        val bytes = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>$bigBody</body></html>"
+            .toByteArray(Charsets.UTF_8)
+        var iterations = 0
+        var caught: Throwable? = null
+        try {
+            // 取消检查在第 50 个事件后触发——解析中途被取消，不应返回完整段落
+            parser.extractChapterFrom(bytes, cancelCheck = { ++iterations >= 50 })
+        } catch (t: Throwable) {
+            caught = t
+        }
+        assertTrue(
+            "段级循环应响应取消抛 CancellationException，实际: ${caught?.let { it::class.simpleName }} $caught",
+            caught is CancellationException
+        )
+        assertTrue("取消应发生在解析中途（不应跑完 ${bytes.size} 字节）", iterations < 1_000)
+    }
+
+    /** 造一个简单 OEBPS/ 布局的最小 epub（供封面等自包含用例），容器指向 OEBPS/content.opf */
+    private fun buildRawEpub(opf: String, files: Map<String, ByteArray>): ByteArray {
+        val container = """
+            <?xml version="1.0"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+            </container>
+        """.trimIndent()
+        val entries = linkedMapOf<String, ByteArray>(
+            "mimetype" to "application/epub+zip".toByteArray(),
+            "META-INF/container.xml" to container.toByteArray(),
+            "OEBPS/content.opf" to opf.toByteArray()
+        )
+        entries.putAll(files)
+        val bytes = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(bytes).use { zip ->
+            entries.forEach { (name, content) ->
+                zip.putNextEntry(java.util.zip.ZipEntry(name))
+                zip.write(content)
+                zip.closeEntry()
+            }
+        }
+        return bytes.toByteArray()
+    }
+
+    private fun minimalChapter(body: String): ByteArray =
+        """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>章</title></head><body>$body</body></html>"""
+            .toByteArray(Charsets.UTF_8)
 
     /** 构造最小 epub2（container + opf + 导航 + 单章），供缺陷回归测试自包含使用（不依赖 fixture） */
     private fun buildMinimalEpub(

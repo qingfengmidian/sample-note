@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
                                     val format = when (name.substringAfterLast('.', "")) {
                                         "md" -> DocFormat.MD
                                         "xml" -> DocFormat.XML
+                                        "epub" -> DocFormat.EPUB // M11b：fixtures 含图 epub 供设备端用例走读
                                         else -> DocFormat.TXT
                                     }
                                     navController.navigate(

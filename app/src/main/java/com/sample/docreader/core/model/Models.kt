@@ -11,13 +11,28 @@ data class Document(
     val name: String,
     val format: DocFormat,
     val chapters: List<Chapter>, // txt/md/xml 为单章；epub 为多章
-    val toc: List<TocEntry> = emptyList() // 文档目录锚点（F2.13，md 由标题提取；epub 可留空，章节跳转走 chapters）
+    val toc: List<TocEntry> = emptyList(), // 文档目录锚点（F2.13，md 由标题提取；epub 可留空，章节跳转走 chapters）
+    val imageRoot: String? = null // F2.14：epub 解压缓存目录绝对路径（缓存成功时非空，渲染层据 src 拼文件路径）；
+                                  // txt/md/xml 恒 null；缓存不可用回退字节解析时也 null（图片走占位）
 )
 
 data class Chapter(
     val title: String?,          // 无标题可为 null
     val paragraphs: List<String>,// 段落级纯文本，渲染/编辑的基础单位
-    val level: Int = 1           // 章节层级（1 起）：epub 目录嵌套用于章节列表缩进，单章格式恒为 1
+    val level: Int = 1,          // 章节层级（1 起）：epub 目录嵌套用于章节列表缩进，单章格式恒为 1
+    val images: List<ParagraphImage> = emptyList() // F2.14 段落内图片（仅 epub 非空）：挂所属段落 item 内渲染，
+                                                   // 不新增 LazyColumn 项——段落索引稳定（评审 S8）
+)
+
+/**
+ * 段落内图片（F2.14）：src 为 epub zip 内路径（按 manifest href 形式规范化，如 "OEBPS/images/x.png"），
+ * 渲染层以 Document.imageRoot + src 定位缓存文件；svg 一律不直接渲染（渲染层给占位提示，评审 S6/S9）。
+ */
+data class ParagraphImage(
+    val paragraphIndex: Int,     // 所属段落索引：图片渲染在该段落 item 内（文字下方；封面在首段文字上方）
+    val src: String,
+    val alt: String? = null,     // 无障碍语义描述来源（img @alt）；占位提示优先显示 alt
+    val isCover: Boolean = false // 封面图（OPF cover 声明）：挂 paragraphIndex=0，按屏宽置顶渲染
 )
 
 /**
