@@ -63,6 +63,37 @@ object FixtureGenerator {
             |未识别语法按原文输出 ~~删除线~~。
             |""".trimMargin())
 
+        // M11 新增（F2.13/TC-F2-20a）：多级 ATX 标题（H1~H6）混合正文/列表/围栏代码块，
+        // 围栏代码块内含 `#` 注释行——目录提取必须跳过（F2.13）。
+        write(dir, "sample_toc.md", Charsets.UTF_8, """
+            |# 标题一（H1）
+            |
+            |## 标题二（H2）
+            |
+            |正文段落，含 **加粗** 与 *斜体*。
+            |
+            |### 标题三（H3）
+            |
+            |- 列表项一
+            |- 列表项二
+            |
+            |#### 标题四（H4）
+            |
+            |```text
+            |# 这是代码注释，不应出现在目录
+            |def code():
+            |    pass
+            |```
+            |
+            |##### 标题五（H5）
+            |
+            |###### 标题六（H6）
+            |
+            |## 结尾标题（H2B）
+            |
+            |结尾段落。
+            |""".trimMargin())
+
         write(dir, "sample.xml", Charsets.UTF_8, """
             |<?xml version="1.0" encoding="UTF-8"?>
             |<library>
@@ -351,6 +382,14 @@ object FixtureGenerator {
         val md = bytes("sample.md").toString(Charsets.UTF_8)
         check(md.contains("# ") && md.contains("```") && md.contains("**") && md.contains("> "),
             "sample.md 应含标题/代码块/加粗/引用")
+
+        // M11 新增（F2.13）：sample_toc.md 应含多级 ATX 标题与围栏代码块（块内含 `#` 注释行）
+        val tocMd = bytes("sample_toc.md").toString(Charsets.UTF_8)
+        val headingLevels = Regex("^#{1,6} ", RegexOption.MULTILINE).findAll(tocMd).count()
+        check(headingLevels >= 6, "sample_toc.md 应含多级 ATX 标题（至少 H1~H6 各一）")
+        check(tocMd.contains("```text") && tocMd.lines().any { it.startsWith("# 这是代码注释") },
+            "sample_toc.md 应含围栏代码块且块内带 `#` 注释行")
+
         check(bytes("sample.xml").toString(Charsets.UTF_8).contains("<contact>"),
             "sample.xml 嵌套层级应 ≥ 3")
 

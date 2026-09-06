@@ -77,6 +77,7 @@ import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
+import com.sample.docreader.core.model.TocEntry
 import com.sample.docreader.core.model.WrapMode
 import com.sample.docreader.core.parse.PagedTextLoader
 import com.sample.docreader.core.progress.ProgressRepository
@@ -194,6 +195,7 @@ fun ReaderScreen(
         onFirstVisibleParagraphChanged = viewModel::onFirstVisibleParagraphChanged,
         onRestoreParagraphConsumed = viewModel::consumeRestoreParagraph,
         onLoadMore = viewModel::loadMore,
+        onTocJumpToParagraph = viewModel::onTocJumpToParagraph,
         onEdit = onEdit
     )
 }
@@ -224,13 +226,16 @@ fun ReaderContent(
     onFirstVisibleParagraphChanged: ((Int) -> Unit)? = null,
     onRestoreParagraphConsumed: (() -> Unit)? = null,
     onLoadMore: (() -> Unit)? = null,
-    onEdit: (() -> Unit)? = null
+    onEdit: (() -> Unit)? = null,
+    // F2.13（S3 方案①）：目录跳转完成后的进度上报回调（预览模式跳转也必须上报，供 VM 落库）
+    onTocJumpToParagraph: ((Int) -> Unit)? = null
 ) {
     val settings = state.settings
     val theme = resolveReadingTheme(settings.theme)
     val chapters = state.document?.chapters.orEmpty()
     val chapter = chapters.getOrNull(state.chapterIndex)
     val paragraphs = chapter?.paragraphs
+    val toc = state.document?.toc.orEmpty() // F2.13：md 目录锚点（xml/txt/epub 为空）
     val isEpub = state.document?.format == DocFormat.EPUB
     val isMd = state.document?.format == DocFormat.MD
     val isTxt = state.document?.format == DocFormat.TXT
@@ -238,6 +243,34 @@ fun ReaderContent(
     var mdPreview by rememberSaveable { mutableStateOf(false) }
     val mdBlocks = remember(paragraphs, isMd) {
         if (isMd) MarkdownParser.parse(paragraphs.orEmpty()) else emptyList()
+    }
+    // F2.13/U4：块↔段落索引映射工具（preview item 是块、源码 item 是段落）
+    val mapping = MdViewMapping
+
+    // F2.13/U4 状态：md 目录面板开关、目录跳转段落索引（一次性）、源码↔预览切换滚动目标（一次性，-1 = 空）
+    var tocSheetOpen by remember { mutableStateOf(false) }
+    var tocJumpParagraph by remember { mutableIntStateOf(-1) }
+    var switchScrollTarget by remember { mutableIntStateOf(-1) }
+
+    // U4：源码↔预览切换位置映射——两个视图共享同一 listState 但 item 语义不同（源码=段落、预览=块），
+    // 切换前记录当前位置并在重组后滚到经块↔段落映射换算的目标（保持一致阅读语义，而非同序号不同内容）。
+    LaunchedEffect(mdPreview) {
+        if (switchScrollTarget >= 0) {
+            listState.scrollToItem(switchScrollTarget)
+            switchScrollTarget = -1
+        }
+    }
+
+    // F2.13（S4/S3）：目录跳转——目标为段落索引；源码直接滚段落，预览经块↔段落映射换算后滚动。
+    // 跳转后把段落索引上报进度（预览模式下普通滚动不上报，但目录跳转必须上报，保证重开回到该标题）。
+    LaunchedEffect(tocJumpParagraph) {
+        if (tocJumpParagraph >= 0) {
+            val paragraph = tocJumpParagraph
+            tocJumpParagraph = -1
+            val target = if (mdPreview) mapping.blockIndexForParagraph(mdBlocks, paragraph) else paragraph
+            listState.scrollToItem(target)
+            onTocJumpToParagraph?.invoke(paragraph)
+        }
     }
 
     // U2（M10）：状态栏/导航栏颜色跟随当前阅读主题背景，**图标明暗也跟随**（深色主题→浅色图标，
@@ -330,10 +363,16 @@ fun ReaderContent(
                     }
                 },
                 actions = {
-                    // F4.5：epub 章节入口上移顶栏图标（md 目录 F2.13 为 M11a 预留同位置）
+                    // F4.5：epub 章节入口上移顶栏图标
                     if (isEpub) {
                         IconButton(onClick = { chapterSheetOpen = true }) {
                             Icon(Icons.AutoMirrored.Filled.List, contentDescription = "章节列表")
+                        }
+                    }
+                    // F2.13（TC-F2-20b）：md 目录入口与 epub 章节同位置；toc 为空时隐藏
+                    if (isMd && toc.isNotEmpty()) {
+                        IconButton(onClick = { tocSheetOpen = true }) {
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "目录")
                         }
                     }
                     var menuOpen by remember { mutableStateOf(false) }
@@ -346,6 +385,13 @@ fun ReaderContent(
                                 text = { Text(if (mdPreview) "源码" else "预览") },
                                 onClick = {
                                     menuOpen = false
+                                    // U4：切换前记录语义位置，重组后经 LaunchedEffect(mdPreview) 滚到映射目标
+                                    val current = listState.firstVisibleItemIndex.coerceAtLeast(0)
+                                    switchScrollTarget = if (mdPreview) {
+                                        mapping.paragraphIndexForBlock(mdBlocks, current) // 预览→源码：块起始段落
+                                    } else {
+                                        mapping.blockIndexForParagraph(mdBlocks, current) // 源码→预览：段落所属块
+                                    }
                                     mdPreview = !mdPreview
                                 }
                             )
@@ -429,6 +475,30 @@ fun ReaderContent(
                 // 面板内翻章后停留在面板可继续选（F4.5）
                 onPrev = { onPrevChapter?.invoke() },
                 onNext = { onNextChapter?.invoke() }
+            )
+        }
+    }
+
+    // F2.13：md 目录面板（复用章节面板交互模式，F4.5）。当前标题高亮（S11：首可见段落
+    // 位于第一个目录标题之前时无高亮，selectedIndex = -1）；点击目录项关闭面板并跳转（经 tocJumpParagraph）。
+    if (tocSheetOpen) {
+        val visibleParagraph = if (mdPreview)
+            mapping.paragraphIndexForBlock(mdBlocks, listState.firstVisibleItemIndex.coerceAtLeast(0))
+        else
+            listState.firstVisibleItemIndex.coerceAtLeast(0)
+        val selectedTocIndex = mapping.tocIndexAtParagraph(visibleParagraph, toc)
+        ModalBottomSheet(
+            onDismissRequest = { tocSheetOpen = false },
+            containerColor = theme.background,
+            contentColor = theme.foreground
+        ) {
+            TocSheetContent(
+                toc = toc,
+                selectedIndex = selectedTocIndex,
+                onSelect = { entry ->
+                    tocSheetOpen = false
+                    tocJumpParagraph = entry.paragraphIndex
+                }
             )
         }
     }
@@ -699,6 +769,59 @@ internal fun ChapterListContent(
                         end = 16.dp,
                         top = 12.dp,
                         bottom = 12.dp
+                    )
+            )
+        }
+    }
+}
+
+/**
+ * md 目录面板主体（F2.13）：标题 + [TocListContent]。
+ * 从 ModalBottomSheet 抽出以便 Robolectric 直驱（同章节面板的做法，TC-F2-20a/b）。
+ */
+@Composable
+internal fun TocSheetContent(
+    toc: List<TocEntry>,
+    selectedIndex: Int,
+    onSelect: (TocEntry) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Text(
+            "目录",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+        TocListContent(toc, selectedIndex, onSelect)
+    }
+}
+
+/**
+ * md 目录列表主体（F2.13）：按 level 缩进展示 H1~H6 层级，当前标题高亮
+ * （主色+加粗+selected 语义，S11：selectedIndex = -1 时无高亮项）；点击目标 ≥ 48dp。
+ */
+@Composable
+internal fun TocListContent(
+    toc: List<TocEntry>,
+    selectedIndex: Int,
+    onSelect: (TocEntry) -> Unit
+) {
+    LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
+        itemsIndexed(toc, key = { index, _ -> index }) { index, entry ->
+            val isCurrent = index == selectedIndex
+            Text(
+                entry.title,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                fontWeight = if (isCurrent) FontWeight.Bold else null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clickable { onSelect(entry) }
+                    .semantics { selected = isCurrent } // 供无障碍与 UI 测试识别当前标题
+                    .padding(
+                        start = ((entry.level - 1) * 16).dp,
+                        end = 16.dp,
+                        top = 8.dp,
+                        bottom = 8.dp
                     )
             )
         }

@@ -10,7 +10,9 @@ import androidx.compose.ui.test.performClick
 import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.Document
+import com.sample.docreader.core.render.MarkdownParser
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -122,5 +124,59 @@ class ReaderMarkdownPreviewTest {
         composeRule.waitForIdle()
 
         assertTrue("预览模式不应上报段落进度，实际上报：$reported", reported.isEmpty())
+    }
+
+    /**
+     * TC-F2-20（U4）：源码↔预览切换的位置映射——源码 item=段落、预览 item=块，索引不同义；
+     * 来回切换后应经块↔段落映射定位到语义一致位置，而非"同序号不同内容"。
+     * 前置长文：Robolectric 视口较矮，目标行前后都要有足够内容（前可滚到、后可定位到顶），
+     * 故在目标段（代码块内 `# code`）前后各铺一批长填充段，保证滚动空间充足。
+     * 结构：A 填充(0..24) + "# 目标标题" + 围栏代码块(`# code`≈29) + "正文尾"(33) + B 填充(34..58)。
+     * 验证：源码滚到段落 29（代码块内）→ 预览落到所属 CodeBlock（块 26，≠29，映射非同序号）；
+     * 预览滚到"正文尾"块（块 27）→ 回源码落到其起始段落 33（≠27）。
+     */
+    @Test
+    fun md_previewToggle_mapsToSemanticPosition() {
+        val filler = (0 until 25).map { "填充段落 $it：" + "这是一段足够长的文字用于撑高列表项，使目标行超出 Robolectric 视口。".repeat(3) }
+        val paragraphs = buildList {
+            addAll(filler)
+            addAll(listOf("", "# 目标标题", "", "```text", "# code", "x", "```", "", "正文尾"))
+            addAll(filler)
+        }
+        val doc = Document(
+            "asset:///fixtures/map.md", "map.md", DocFormat.MD,
+            listOf(Chapter("map.md", paragraphs))
+        )
+        val blocks = MarkdownParser.parse(paragraphs)
+        val sourcePara = paragraphs.indexOf("# code")
+        val tailPara = paragraphs.indexOf("正文尾")
+        val listState = setContent(doc)
+
+        // 源码滚到代码块内段落（# code 注释行，位于视口外但距底足够远）
+        composeRule.runOnIdle { runBlocking { listState.scrollToItem(sourcePara) } }
+        composeRule.waitForIdle()
+        assertEquals("源码应滚到段落 $sourcePara，实际首可见 ${listState.firstVisibleItemIndex}",
+            sourcePara, listState.firstVisibleItemIndex)
+
+        // 源码 → 预览：该段落属 CodeBlock → 预览应落在所属块；块索引 ≠ 段落索引（语义映射）
+        val expectedBlock = MdViewMapping.blockIndexForParagraph(blocks, sourcePara)
+        assertTrue("映射应跨坐标（块 ≠ 段落），实际块 $expectedBlock", expectedBlock != sourcePara)
+        composeRule.onNodeWithContentDescription("菜单").performClick()
+        composeRule.onNodeWithText("预览").performClick()
+        composeRule.waitForIdle()
+        assertEquals("预览应落在所属 CodeBlock", expectedBlock, listState.firstVisibleItemIndex)
+
+        // 预览滚到"正文尾"块，再切回源码：应落到该块起始段落（≠块序号）
+        val tailBlock = MdViewMapping.blockIndexForParagraph(blocks, tailPara)
+        composeRule.runOnIdle { runBlocking { listState.scrollToItem(tailBlock) } }
+        composeRule.waitForIdle()
+        assertEquals(tailBlock, listState.firstVisibleItemIndex)
+        composeRule.onNodeWithContentDescription("菜单").performClick()
+        composeRule.onNodeWithText("源码").performClick()
+        composeRule.waitForIdle()
+        val expectedParagraph = MdViewMapping.paragraphIndexForBlock(blocks, tailBlock)
+        assertTrue("预览→源码应落到块起始段落（≠块序号），实际段落 $expectedParagraph",
+            expectedParagraph != tailBlock)
+        assertEquals(expectedParagraph, listState.firstVisibleItemIndex)
     }
 }

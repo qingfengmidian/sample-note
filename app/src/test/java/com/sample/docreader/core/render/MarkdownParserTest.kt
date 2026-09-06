@@ -34,8 +34,8 @@ class MarkdownParserTest {
 
         assertEquals(9, blocks.size)
 
-        assertEquals(MarkdownBlock.Heading(1, listOf(MdInline.Text("标题一"))), blocks[0])
-        assertEquals(MarkdownBlock.Heading(2, listOf(MdInline.Text("标题二"))), blocks[1])
+        assertEquals(MarkdownBlock.Heading(1, listOf(MdInline.Text("标题一")), 0), blocks[0])
+        assertEquals(MarkdownBlock.Heading(2, listOf(MdInline.Text("标题二")), 2), blocks[1])
 
         val paragraph = blocks[2] as MarkdownBlock.Paragraph
         assertEquals(
@@ -49,10 +49,10 @@ class MarkdownParserTest {
             paragraph.inlines
         )
 
-        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("列表项一")), ordered = false), blocks[3])
-        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("列表项二")), ordered = false), blocks[4])
-        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("有序项")), ordered = true, number = 1), blocks[5])
-        assertEquals(MarkdownBlock.Quote(listOf(MdInline.Text("引用段落。"))), blocks[6])
+        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("列表项一")), ordered = false, startParagraphIndex = 6), blocks[3])
+        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("列表项二")), ordered = false, startParagraphIndex = 7), blocks[4])
+        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("有序项")), ordered = true, number = 1, startParagraphIndex = 9), blocks[5])
+        assertEquals(MarkdownBlock.Quote(listOf(MdInline.Text("引用段落。")), 11), blocks[6])
 
         val code = blocks[7] as MarkdownBlock.CodeBlock
         assertEquals("kotlin", code.language)
@@ -105,9 +105,86 @@ class MarkdownParserTest {
     @Test
     fun parse_orderedList_keepsNumbers() {
         val blocks = MarkdownParser.parse(listOf("2. 第二项", "3. 第三项", "- 无序项"))
-        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("第二项")), ordered = true, number = 2), blocks[0])
-        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("第三项")), ordered = true, number = 3), blocks[1])
-        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("无序项")), ordered = false), blocks[2])
+        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("第二项")), ordered = true, number = 2, startParagraphIndex = 0), blocks[0])
+        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("第三项")), ordered = true, number = 3, startParagraphIndex = 1), blocks[1])
+        assertEquals(MarkdownBlock.ListItem(listOf(MdInline.Text("无序项")), ordered = false, startParagraphIndex = 2), blocks[2])
+    }
+
+    /**
+     * F2.13（S4）：每个块携带 startParagraphIndex——块起始行在源码段落流中的行号。
+     * CodeBlock 锚定其围栏起始行；空行在段落流中仍占位计数（源码 item=段落）。
+     */
+    @Test
+    fun parse_blocks_carryStartParagraphIndex() {
+        val paragraphs = listOf(
+            "前导段落", // 0
+            "",         // 1 空行在段落流中占位
+            "# 标题",   // 2
+            "",         // 3
+            "```text",  // 4 围栏起始行
+            "# 注释",   // 5 代码块内行
+            "```",      // 6
+            "",         // 7
+            "结尾段落"   // 8
+        )
+        val blocks = MarkdownParser.parse(paragraphs)
+        assertEquals(4, blocks.size)
+        assertEquals(MarkdownBlock.Paragraph(listOf(MdInline.Text("前导段落")), 0), blocks[0])
+        assertEquals(MarkdownBlock.Heading(1, listOf(MdInline.Text("标题")), 2), blocks[1])
+        // CodeBlock 锚定围栏起始行 4（而非代码首行 5）
+        val code = blocks[2] as MarkdownBlock.CodeBlock
+        assertEquals("text", code.language)
+        assertEquals("# 注释", code.code)
+        assertEquals(4, code.startParagraphIndex)
+        assertEquals(MarkdownBlock.Paragraph(listOf(MdInline.Text("结尾段落")), 8), blocks[3])
+    }
+
+    /** F2.13（S10）：scanHeadings 提取标题目录——多级 ATX、行内标记剥离、围栏代码块跳过、封闭 ATX 与 Setext 不识别、无标题空 toc */
+    @Test
+    fun scanHeadings_extractsToc_andSkipsFenceClosedSetext() {
+        val paragraphs = listOf(
+            "# 标题一",             // 0
+            "",                     // 1
+            "## 标题 **二**",        // 2 → 行内加粗剥离为 "标题 二"
+            "",                     // 3
+            "### `标题`三",          // 4 → 行内代码剥离为 "标题三"
+            "正文段落",              // 5
+            "- 列表项",              // 6
+            "",                     // 7
+            "```text",              // 8 围栏开始
+            "# 代码注释，不应出现",   // 9 代码块内 # 行
+            "```",                  // 10
+            "",                     // 11
+            "#### 标题 #",           // 12 ATX 封闭形式（`标题 #`）→ 不支持，不识别
+            "",                     // 13
+            "Setext 标题",           // 14
+            "=====",                // 15 Setext 下划线 → 不识别
+            "",                     // 16
+            "# 结尾"                // 17
+        )
+        val toc = MarkdownParser.scanHeadings(paragraphs)
+        // 仅开放 ATX 且不在代码块内：标题一(0)、标题 二(2)、标题三(4)、结尾(17)；共 4 条
+        assertEquals(
+            listOf(
+                com.sample.docreader.core.model.TocEntry(1, "标题一", 0),
+                com.sample.docreader.core.model.TocEntry(2, "标题 二", 2),
+                com.sample.docreader.core.model.TocEntry(3, "标题三", 4),
+                com.sample.docreader.core.model.TocEntry(1, "结尾", 17)
+            ),
+            toc
+        )
+    }
+
+    /** F2.13（S10）：无标题/纯正文文档 toc 为空；scanHeadings 与 parse 的标题语法完全同源（封闭 ATX 均降级为段落） */
+    @Test
+    fun scanHeadings_emptyToc_and_closedAtxDegradesInParseToo() {
+        // 无标题：只有正文/列表 → 空 toc
+        assertTrue(MarkdownParser.scanHeadings(listOf("仅正文", "", "- 列表项", "> 引用")).isEmpty())
+
+        // 封闭 ATX 在 parse 中同样降级为普通段落（标题语法同源，S10）
+        val blocks = MarkdownParser.parse(listOf("# 标题 #"))
+        assertEquals(1, blocks.size)
+        assertTrue("封闭 ATX 应降级为普通段落", blocks[0] is MarkdownBlock.Paragraph)
     }
 
     /** TC-UT-07：未闭合 ``` 围栏 → 产出单个 CodeBlock（含到文件末尾的内容），不崩溃 */

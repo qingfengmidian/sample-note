@@ -10,13 +10,25 @@ data class Document(
     val uri: String,             // 内容 URI（SAF）或 asset:/// 桩
     val name: String,
     val format: DocFormat,
-    val chapters: List<Chapter>  // txt/md/xml 为单章；epub 为多章
+    val chapters: List<Chapter>, // txt/md/xml 为单章；epub 为多章
+    val toc: List<TocEntry> = emptyList() // 文档目录锚点（F2.13，md 由标题提取；epub 可留空，章节跳转走 chapters）
 )
 
 data class Chapter(
     val title: String?,          // 无标题可为 null
     val paragraphs: List<String>,// 段落级纯文本，渲染/编辑的基础单位
     val level: Int = 1           // 章节层级（1 起）：epub 目录嵌套用于章节列表缩进，单章格式恒为 1
+)
+
+/**
+ * 目录锚点（F2.13）：md 解析时把标题提取为目录项，锚定单章段落流中的段落索引。
+ * 段落索引是渲染/进度/toc 的统一坐标（源码 LazyColumn item 索引 == 段落索引），
+ * 预览视图跳转经 MarkdownBlock↔段落索引映射换算（见 MarkdownParser.startParagraphIndex）。
+ */
+data class TocEntry(
+    val level: Int,            // 1~6（对应 ATX H1~H6）
+    val title: String,         // 标题纯文本（去除 # 前缀与行内标记符号，评审 S10）
+    val paragraphIndex: Int    // 标题所在段落索引（源码视图滚动目标；预览经块↔段落映射）
 )
 
 enum class WrapMode { WRAP, NO_WRAP }

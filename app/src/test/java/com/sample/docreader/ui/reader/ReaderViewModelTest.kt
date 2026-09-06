@@ -495,4 +495,47 @@ class ReaderViewModelTest {
         assertEquals(ReaderFont.SANS, vm.uiState.value.settings.font)
         assertTrue("切换离开 CUSTOM 不应删除字体文件", newFile.exists())
     }
+
+    /** F2.13（TC-F2-20a 解析→VM）：加载含多级标题的 sample_toc.md → Document.toc 非空且标题正确 */
+    @Test
+    fun load_md_fixture_populatesToc() = runTest {
+        val (vm, _) = newViewModel(this)
+        vm.load("asset:///fixtures/sample_toc.md", DocFormat.MD)
+        awaitLoaded(vm)
+        val s = vm.uiState.value
+        assertNull(s.error)
+        val toc = s.document?.toc.orEmpty()
+        assertTrue("md 应提取目录", toc.isNotEmpty())
+        assertEquals(1, s.document!!.chapters.size)
+        // toc 标题纯文本应与源码标题行一致（sample_toc.md 标题行 = "# 标题" 形式，无行内标记干扰）
+        val paragraphs = s.document!!.chapters[0].paragraphs
+        toc.forEach { entry ->
+            assertTrue(paragraphs[entry.paragraphIndex].startsWith("#".repeat(entry.level) + " "))
+        }
+    }
+
+    /** F2.13（S3 方案①）：目录跳转立即落库（不经防抖），重开恢复回到该标题段落 */
+    @Test
+    fun tocJump_immediatePersist_reopenRestores() = runTest {
+        val (vm, progress, db) = newViewModelWithProgress(this)
+        vm.load("asset:///fixtures/sample_toc.md", DocFormat.MD)
+        awaitLoaded(vm)
+        val toc = vm.uiState.value.document!!.toc
+        assertTrue(toc.isNotEmpty())
+        val jumpParagraph = toc.last().paragraphIndex // 跳到末标题，非首段 0
+
+        vm.onTocJumpToParagraph(jumpParagraph)
+        awaitProgress(progress, "asset:///fixtures/sample_toc.md", chapter = 0, paragraph = jumpParagraph)
+
+        // 重开同一文件 → 恢复到该标题段落（复用同一 Room 库构造第二个 VM，进度才能被读到）
+        val store2 = PreferenceDataStoreFactory.create(
+            scope = backgroundScope,
+            produceFile = { tmpFolder.newFile("reader2_${System.nanoTime()}.preferences_pb") }
+        )
+        val vm2 = ReaderViewModel(ResourceFileOpener(), SettingsRepository(store2), ProgressRepository(db))
+        vm2.load("asset:///fixtures/sample_toc.md", DocFormat.MD)
+        awaitLoaded(vm2)
+        assertEquals(jumpParagraph, vm2.uiState.value.restoreParagraph)
+        db.close()
+    }
 }

@@ -222,6 +222,17 @@ class ReaderViewModel(
         scheduleProgressPersist(_uiState.value.chapterIndex, currentParagraph)
     }
 
+    /**
+     * F2.13（S3 方案①）：md 目录跳转完成后的进度上报——**立即落库**（不经防抖），
+     * 保证跳转后立刻退出/杀进程，重开也能回到该标题处。预览模式经目录跳转时 UI 走此上报
+     * （预览模式普通滚动不上报，仅目录跳转例外）。
+     */
+    fun onTocJumpToParagraph(paragraph: Int) {
+        val p = paragraph.coerceAtLeast(0)
+        currentParagraph = p
+        persistProgress(_uiState.value.chapterIndex, p)
+    }
+
     /** UI 完成一次 restoreParagraph 滚动后调用，清除一次性目标 */
     fun consumeRestoreParagraph() = _uiState.update { it.copy(restoreParagraph = null) }
 
