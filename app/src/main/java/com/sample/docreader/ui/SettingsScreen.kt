@@ -66,10 +66,13 @@ fun SettingsScreen(onBack: () -> Unit) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     importCustomFont(context, uri)
-                }.getOrElse { e -> ImportResult(failure = e.message ?: "导入失败") }
+                }.getOrElse { e -> FontImportResult(failure = e.message ?: "导入失败") }
             }
             if (result.path != null) {
+                // G2（M10）：重新导入成功后删除上一版旧字体文件（孤儿文件清理）；切换离开 CUSTOM 不删（允许切回）
+                val oldPath = settings.customFontPath
                 repository.save(settings.copy(font = ReaderFont.CUSTOM, customFontPath = result.path))
+                if (oldPath != null && oldPath != result.path) File(oldPath).delete()
                 message = "自定义字体已导入"
             } else {
                 message = result.failure
@@ -170,7 +173,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             CycleSettingRow(
                 title = "默认字体",
                 value = fontLabel(settings.font),
-                onClick = { scope.launch { repository.save(settings.copy(font = nextFont(settings.font))) } }
+                onClick = {
+                    // G2（M10）：customFontPath 非空时循环序列纳入 CUSTOM（与 ReaderViewModel.cycleFont 一致）
+                    scope.launch { repository.save(settings.copy(font = nextFont(settings.font, settings.customFontPath))) }
+                }
             )
             CycleSettingRow(
                 title = "默认阅读主题",
@@ -208,10 +214,13 @@ internal fun AutoSaveRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     }
 }
 
-private data class ImportResult(val path: String? = null, val failure: String? = null)
+internal data class FontImportResult(val path: String? = null, val failure: String? = null)
 
-/** 复制所选字体到私有 files/fonts/ 并用 Typeface 预验证；失败返回描述，成功返回绝对路径 */
-private fun importCustomFont(context: android.content.Context, uri: android.net.Uri): ImportResult {
+/**
+ * 复制所选字体到私有 files/fonts/ 并用 Typeface 预验证；失败返回描述，成功返回绝对路径。
+ * internal：阅读设置面板（M10，F4.4）复用同一 SAF 导入流程（见 ReaderScreen「导入字体」入口）。
+ */
+internal fun importCustomFont(context: android.content.Context, uri: android.net.Uri): FontImportResult {
     val displayName = context.contentResolver.query(
         uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
     )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
@@ -221,16 +230,16 @@ private fun importCustomFont(context: android.content.Context, uri: android.net.
     val dir = File(context.filesDir, "fonts").apply { mkdirs() }
     val out = File(dir, "${UUID.randomUUID()}.$ext")
     val input = context.contentResolver.openInputStream(uri)
-        ?: return ImportResult(failure = "无法读取所选文件")
+        ?: return FontImportResult(failure = "无法读取所选文件")
     input.use { ins -> out.outputStream().use { os -> ins.copyTo(os) } }
 
     // Typeface.createFromFile 对无效字体抛异常；失败删除副本，避免残留垃圾文件
     val valid = runCatching { Typeface.createFromFile(out) }.isSuccess
     if (!valid) {
         out.delete()
-        return ImportResult(failure = "字体文件无效，请选择有效的 ttf/otf")
+        return FontImportResult(failure = "字体文件无效，请选择有效的 ttf/otf")
     }
-    return ImportResult(path = out.absolutePath)
+    return FontImportResult(path = out.absolutePath)
 }
 
 private fun fontLabel(font: ReaderFont): String = when (font) {
@@ -306,9 +315,16 @@ private fun nextLineHeight(current: Int): Int {
     return steps[(index + 1).mod(steps.size)]
 }
 
-/** 字体循环：代码→衬线→无衬线（与 ReaderViewModel.cycleFont 一致；CUSTOM 由上方导入区块管理） */
-private fun nextFont(current: ReaderFont): ReaderFont {
-    val order = listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
+/**
+ * 字体循环：代码→衬线→无衬线；G2（M10）：customFontPath 非空时序列追加 CUSTOM。
+ * 与 ReaderViewModel.cycleFont 一致。
+ */
+private fun nextFont(current: ReaderFont, customFontPath: String? = null): ReaderFont {
+    val order = if (customFontPath != null) {
+        listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS, ReaderFont.CUSTOM)
+    } else {
+        listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
+    }
     return order[(order.indexOf(current) + 1).mod(order.size)]
 }
 

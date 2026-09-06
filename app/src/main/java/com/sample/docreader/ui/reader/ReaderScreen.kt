@@ -1,24 +1,33 @@
 package com.sample.docreader.ui.reader
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -26,17 +35,21 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.core.view.WindowCompat
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,10 +57,15 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,12 +83,32 @@ import com.sample.docreader.core.progress.ProgressRepository
 import com.sample.docreader.core.recent.AppDatabase
 import com.sample.docreader.core.render.MarkdownParser
 import com.sample.docreader.core.settings.SettingsRepository
+import com.sample.docreader.ui.FontImportResult
+import com.sample.docreader.ui.importCustomFont
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** 阅读界面（设计§4）：顶部栏（书名/章节名）+ 正文区 + 底部工具条 + epub 章节列表/翻章。 */
+/**
+ * 阅读界面（设计§4，M10 改版 F4.4/F4.5）：
+ * 顶栏（返回 + 章节名/书名 + epub 章节图标 + ⋯ 菜单）+ 全屏正文区；
+ * 阅读设置收纳为「⋯ → 阅读设置」ModalBottomSheet 面板（排版/字体/主题三组，U3 单选/分段选择）；
+ * epub 章节面板升级为 ModalBottomSheet 并内置上一章/下一章翻章。**不常驻底部工具条**。
+ */
 
 /** 超大文件（>2MB）编辑入口置灰说明文字（TC-F3-09，设计§8） */
 const val EDIT_HINT_TOO_LARGE = "编辑（文件超过 2MB，仅可只读）"
+
+/** G1（F2.6）：手动编码覆盖可选项（charset 名，null = 自动探测）；仅 txt 显示 */
+internal val ENCODING_OPTIONS: List<Pair<String?, String>> = listOf(
+    null to "自动探测",
+    "UTF-8" to "UTF-8",
+    "UTF-16LE" to "UTF-16LE",
+    "UTF-16BE" to "UTF-16BE",
+    "GBK" to "GBK",
+    "ISO-8859-1" to "Latin-1"
+)
 
 @Composable
 fun ReaderScreen(
@@ -104,15 +142,52 @@ fun ReaderScreen(
         }
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // 「导入字体」入口（F4.4 设置面板，G2）：复用 SettingsScreen 的 SAF 导入流程，
+    // 成功后经 ViewModel.applyCustomFont 切到 CUSTOM 并清理旧字体孤儿文件
+    val scope = rememberCoroutineScope()
+    var fontImportMessage by remember { mutableStateOf<String?>(null) }
+    val fontLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { picked ->
+        if (picked == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            fontImportMessage = null
+            val result = withContext(Dispatchers.IO) {
+                runCatching { importCustomFont(context, picked) }
+                    .getOrElse { e -> FontImportResult(failure = e.message ?: "导入失败") }
+            }
+            if (result.path != null) {
+                viewModel.applyCustomFont(result.path)
+                fontImportMessage = "自定义字体已导入"
+            } else {
+                fontImportMessage = result.failure
+            }
+        }
+    }
+
     BackHandler { onBack() }
     ReaderContent(
         state = state,
         onBack = onBack,
-        onToggleWrap = viewModel::toggleWrap,
         onFontSizeStep = viewModel::stepFontSize,
-        onCycleLineHeight = viewModel::cycleLineHeight,
-        onCycleFont = viewModel::cycleFont,
-        onCycleTheme = viewModel::cycleTheme,
+        onSetWrapMode = viewModel::setWrapMode,
+        onSetLineHeight = viewModel::setLineHeight,
+        onSetFont = viewModel::setFont,
+        onSetTheme = viewModel::setTheme,
+        onSetEncoding = viewModel::setEncodingOverride,
+        onImportFont = {
+            fontLauncher.launch(
+                arrayOf(
+                    "application/x-font-ttf",
+                    "application/x-font-otf",
+                    "font/ttf",
+                    "font/otf",
+                    "application/octet-stream"
+                )
+            )
+        },
+        fontImportMessage = fontImportMessage,
         onSelectChapter = viewModel::selectChapter,
         onPrevChapter = { viewModel.selectChapter(state.chapterIndex - 1) },
         onNextChapter = { viewModel.selectChapter(state.chapterIndex + 1) },
@@ -126,17 +201,22 @@ fun ReaderScreen(
 /**
  * 无状态阅读界面主体：状态与回调全部外提，便于 Compose UI Test 直接驱动。
  * 换行模式切换位置保持（F2.2/TC-UI-01）：切换前记录首可见段落索引，重组后滚回该段落。
+ * M10（F4.4）：设置类操作不再平铺底部工具条，全部收纳进 ⋯ 菜单唤起的阅读设置面板；
+ * 面板内换行分段选择/行距单选/字体单选/主题单选/编码单选（G1，仅 txt）均为直接设置回调。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderContent(
     state: ReaderUiState,
     onBack: () -> Unit,
-    onToggleWrap: () -> Unit,
     onFontSizeStep: (Int) -> Unit,
-    onCycleLineHeight: () -> Unit,
-    onCycleFont: () -> Unit,
-    onCycleTheme: () -> Unit,
+    onSetWrapMode: (WrapMode) -> Unit = {},
+    onSetLineHeight: (Int) -> Unit = {},
+    onSetFont: (ReaderFont) -> Unit = {},
+    onSetTheme: (ReadingTheme?) -> Unit = {},
+    onSetEncoding: (String?) -> Unit = {},
+    onImportFont: () -> Unit = {},
+    fontImportMessage: String? = null,
     listState: LazyListState = rememberLazyListState(),
     onSelectChapter: ((Int) -> Unit)? = null,
     onPrevChapter: (() -> Unit)? = null,
@@ -158,6 +238,33 @@ fun ReaderContent(
     var mdPreview by rememberSaveable { mutableStateOf(false) }
     val mdBlocks = remember(paragraphs, isMd) {
         if (isMd) MarkdownParser.parse(paragraphs.orEmpty()) else emptyList()
+    }
+
+    // U2（M10）：状态栏/导航栏颜色跟随当前阅读主题背景，**图标明暗也跟随**（深色主题→浅色图标，
+    // 浅色主题→深色图标；否则系统深色模式下强制默认白会出现白图标贴浅底的对比度事故）；
+    // 跟随系统（theme == null）或离开阅读页时恢复 enableEdgeToEdge 的系统默认值。经 LocalView.context 取 window。
+    val view = LocalView.current
+    DisposableEffect(settings.theme) {
+        val window = (view.context as? Activity)?.window
+        val explicitTheme = settings.theme
+        val insetsController = window?.let { WindowCompat.getInsetsController(it, view) }
+        // 设置前捕获系统默认外观，onDispose 原样恢复
+        val prevLightStatus = insetsController?.isAppearanceLightStatusBars
+        val prevLightNav = insetsController?.isAppearanceLightNavigationBars
+        if (window != null && explicitTheme != null) {
+            val barColor = explicitTheme.background.toArgb()
+            window.statusBarColor = barColor
+            window.navigationBarColor = barColor
+            val lightBars = explicitTheme.background.luminance() > 0.5f
+            insetsController?.isAppearanceLightStatusBars = lightBars
+            insetsController?.isAppearanceLightNavigationBars = lightBars
+        }
+        onDispose {
+            window?.statusBarColor = Color.Transparent.toArgb()
+            window?.navigationBarColor = Color.Transparent.toArgb()
+            if (prevLightStatus != null) insetsController?.isAppearanceLightStatusBars = prevLightStatus
+            if (prevLightNav != null) insetsController?.isAppearanceLightNavigationBars = prevLightNav
+        }
     }
 
     // rememberSaveable：旋转恰好发生在切换重组间隙时不丢位置保持目标（Int 可直接 saveable）
@@ -205,6 +312,7 @@ fun ReaderContent(
     }
 
     var chapterSheetOpen by remember { mutableStateOf(false) }
+    var settingsSheetOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = theme.background,
@@ -222,6 +330,12 @@ fun ReaderContent(
                     }
                 },
                 actions = {
+                    // F4.5：epub 章节入口上移顶栏图标（md 目录 F2.13 为 M11a 预留同位置）
+                    if (isEpub) {
+                        IconButton(onClick = { chapterSheetOpen = true }) {
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "章节列表")
+                        }
+                    }
                     var menuOpen by remember { mutableStateOf(false) }
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "菜单")
@@ -248,6 +362,14 @@ fun ReaderContent(
                                 }
                             )
                         }
+                        // F4.4：阅读设置入口——唤起 ModalBottomSheet 设置面板
+                        DropdownMenuItem(
+                            text = { Text("阅读设置") },
+                            onClick = {
+                                menuOpen = false
+                                settingsSheetOpen = true
+                            }
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -257,32 +379,24 @@ fun ReaderContent(
                     actionIconContentColor = theme.foreground
                 )
             )
-        },
-        bottomBar = {
-            ReaderToolbar(
-                settings = settings,
-                onToggleWrap = {
-                    pendingParagraph = listState.firstVisibleItemIndex
-                    onToggleWrap()
-                },
-                onFontSizeStep = onFontSizeStep,
-                onCycleLineHeight = onCycleLineHeight,
-                onCycleFont = onCycleFont,
-                onCycleTheme = onCycleTheme,
-                isEpub = isEpub,
-                onChapterList = if (isEpub) ({ chapterSheetOpen = true }) else null,
-                onPrevChapter = onPrevChapter,
-                onNextChapter = onNextChapter
-            )
         }
+        // M10（F4.4）：不常驻底部工具条，正文区全屏
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                state.error != null -> Text(
-                    state.error,
-                    color = theme.foreground,
-                    modifier = Modifier.align(Alignment.Center)
-                )
+                // U7（M10）：错误态附「返回」操作引导（走现有返回导航）
+                state.error != null -> Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(state.error.orEmpty(), color = theme.foreground)
+                    TextButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .semantics { contentDescription = "返回" }
+                    ) { Text("返回") }
+                }
                 // 加载中：document 为 null 且无错误（避免 0 章 epub 误判为加载中而永久转圈）
                 state.loading || state.document == null ->
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -298,35 +412,266 @@ fun ReaderContent(
         }
     }
 
+    // F4.5：章节面板升级为 ModalBottomSheet（原 AlertDialog），底部内置上一章/下一章翻章
     if (chapterSheetOpen) {
-        ChapterListSheet(
-            chapters = chapters,
-            currentIndex = state.chapterIndex,
-            onSelect = { index ->
-                chapterSheetOpen = false
-                onSelectChapter?.invoke(index)
-            },
-            onDismiss = { chapterSheetOpen = false }
-        )
+        ModalBottomSheet(
+            onDismissRequest = { chapterSheetOpen = false },
+            containerColor = theme.background,
+            contentColor = theme.foreground
+        ) {
+            ChapterSheetContent(
+                chapters = chapters,
+                currentIndex = state.chapterIndex,
+                onSelect = { index ->
+                    chapterSheetOpen = false
+                    onSelectChapter?.invoke(index)
+                },
+                // 面板内翻章后停留在面板可继续选（F4.5）
+                onPrev = { onPrevChapter?.invoke() },
+                onNext = { onNextChapter?.invoke() }
+            )
+        }
+    }
+
+    // F4.4：阅读设置面板（ModalBottomSheet，排版/字体/主题三组，面板跟随当前阅读主题配色）
+    if (settingsSheetOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { settingsSheetOpen = false },
+            containerColor = theme.background,
+            contentColor = theme.foreground
+        ) {
+            ReaderSettingsSheetContent(
+                settings = settings,
+                isTxt = isTxt,
+                encodingOverride = state.encodingOverride,
+                onSelectWrapMode = { mode ->
+                    // 换行切换位置保持（F2.2/TC-UI-01）：切换前记录首可见段落索引，重组后由上方 LaunchedEffect 滚回
+                    if (mode != settings.wrapMode) pendingParagraph = listState.firstVisibleItemIndex
+                    onSetWrapMode(mode)
+                },
+                onFontSizeStep = onFontSizeStep,
+                onSelectLineHeight = onSetLineHeight,
+                onSelectFont = onSetFont,
+                onSelectTheme = onSetTheme,
+                onSelectEncoding = onSetEncoding,
+                onImportFont = onImportFont,
+                fontImportMessage = fontImportMessage
+            )
+        }
     }
 }
 
-/** epub 章节列表弹层（F2.7）：AlertDialog 包裹 [ChapterListContent]（Robolectric 下对话框窗口不进语义树，列表主体单独抽测） */
+/**
+ * 章节面板主体（F4.5）：章节列表（高亮/缩进/selected 语义不变，见 [ChapterListContent]）
+ * + 底部上一章/下一章翻章按钮（边界章节置灰）。
+ * 从 ModalBottomSheet 抽出以便 Robolectric 直驱（同 AlertDialog 时代的 ChapterListContent 做法）。
+ */
 @Composable
-private fun ChapterListSheet(
+internal fun ChapterSheetContent(
     chapters: List<com.sample.docreader.core.model.Chapter>,
     currentIndex: Int,
     onSelect: (Int) -> Unit,
-    onDismiss: () -> Unit
+    onPrev: () -> Unit,
+    onNext: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("章节") },
-        text = { ChapterListContent(chapters, currentIndex, onSelect) },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Text(
+            "章节",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+        ChapterListContent(chapters, currentIndex, onSelect)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TextButton(
+                onClick = onPrev,
+                enabled = currentIndex > 0,
+                modifier = Modifier
+                    .weight(1f)
+                    .defaultMinSize(minHeight = 48.dp)
+                    .semantics { contentDescription = "上一章" }
+            ) { Text("上一章") }
+            TextButton(
+                onClick = onNext,
+                enabled = currentIndex < chapters.lastIndex,
+                modifier = Modifier
+                    .weight(1f)
+                    .defaultMinSize(minHeight = 48.dp)
+                    .semantics { contentDescription = "下一章" }
+            ) { Text("下一章") }
         }
-    )
+    }
+}
+
+/**
+ * 阅读设置面板主体（F4.4，U3）：排版 / 字体 / 主题三组，单选带选中勾与 stateDescription，
+ * 全部可点击目标 ≥ 48dp。与 SettingsScreen 全局页同一 SettingsRepository 数据源（F3.3 全局共享不变）。
+ * 从 ModalBottomSheet 抽出以便 Robolectric 直驱（设计 §4：面板内控件存在与回调触发为断言对象）。
+ */
+@Composable
+internal fun ReaderSettingsSheetContent(
+    settings: ReadingSettings,
+    isTxt: Boolean,
+    encodingOverride: String?,
+    onSelectWrapMode: (WrapMode) -> Unit,
+    onFontSizeStep: (Int) -> Unit,
+    onSelectLineHeight: (Int) -> Unit,
+    onSelectFont: (ReaderFont) -> Unit,
+    onSelectTheme: (ReadingTheme?) -> Unit,
+    onSelectEncoding: (String?) -> Unit,
+    onImportFont: () -> Unit,
+    fontImportMessage: String? = null
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 24.dp)
+    ) {
+        // ---- 排版组：换行模式（分段选择）/ 字号（A- A+）/ 行距（单选）/ 编码（G1，仅 txt） ----
+        Text("排版", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            SheetRadioOption(
+                label = "自动换行",
+                selected = settings.wrapMode == WrapMode.WRAP,
+                onClick = { onSelectWrapMode(WrapMode.WRAP) },
+                modifier = Modifier.weight(1f)
+            )
+            SheetRadioOption(
+                label = "不换行",
+                selected = settings.wrapMode == WrapMode.NO_WRAP,
+                onClick = { onSelectWrapMode(WrapMode.NO_WRAP) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        // 字号：A- / 当前值 sp / A+（档位与端点 clamp 见 ReaderViewModel.stepFontSize）
+        Row(
+            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("字号", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text("${settings.fontSizeSp}sp", style = MaterialTheme.typography.bodyMedium)
+            TextButton(
+                onClick = { onFontSizeStep(-1) },
+                modifier = Modifier
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .semantics { contentDescription = "减小字号" }
+            ) { Text("A-") }
+            TextButton(
+                onClick = { onFontSizeStep(1) },
+                modifier = Modifier
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .semantics { contentDescription = "增大字号" }
+            ) { Text("A+") }
+        }
+        // 行距单选（U3：不再循环）：120/150/180/200%
+        ReaderViewModel.LINE_HEIGHT_STEPS.forEach { percent ->
+            SheetRadioOption(
+                label = "行距 $percent%",
+                selected = settings.lineHeightPercent == percent,
+                onClick = { onSelectLineHeight(percent) }
+            )
+        }
+        // G1（F2.6）：编码手动切换，仅 txt 显示；自动探测时无额外探测结果展示
+        if (isTxt) {
+            Text("编码", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 4.dp))
+            ENCODING_OPTIONS.forEach { (charsetName, label) ->
+                SheetRadioOption(
+                    label = label,
+                    selected = encodingOverride == charsetName,
+                    onClick = { onSelectEncoding(charsetName) }
+                )
+            }
+        }
+
+        // ---- 字体组（U3 单选）：代码 / 衬线 / 无衬线 / 自定义（仅 customFontPath 非空时出现）+ 导入字体 ----
+        Text("字体", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+        val fontOptions = buildList {
+            add(ReaderFont.CODE)
+            add(ReaderFont.SERIF)
+            add(ReaderFont.SANS)
+            if (settings.customFontPath != null) add(ReaderFont.CUSTOM) // G2：导入后 CUSTOM 可再次选中
+        }
+        fontOptions.forEach { font ->
+            SheetRadioOption(
+                label = fontLabel(font),
+                selected = settings.font == font,
+                onClick = { onSelectFont(font) }
+            )
+        }
+        TextButton(
+            onClick = onImportFont,
+            modifier = Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 48.dp)
+                .semantics { contentDescription = "导入字体" }
+        ) { Text("导入自定义字体（ttf/otf）") }
+        fontImportMessage?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall)
+        }
+
+        // ---- 主题组（U3 单选，色块 + 文字，选中勾） ----
+        Text("主题", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+        THEME_OPTIONS.forEach { (value, label) ->
+            SheetRadioOption(
+                label = label,
+                selected = settings.theme == value,
+                onClick = { onSelectTheme(value) },
+                leading = value?.let { themeValue ->
+                    {
+                        // 主题色块预览（背景色块 + 细边框，夜间黑在浅底上也可辨认）
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(24.dp)
+                                .background(themeValue.background)
+                                .border(1.dp, themeValue.foreground)
+                        )
+                    }
+                }
+            )
+        }
+    }
+}
+
+/** 主题单选项（null = 跟随系统） */
+private val THEME_OPTIONS: List<Pair<ReadingTheme?, String>> = listOf(
+    null to "跟随系统",
+    ReadingTheme.DEFAULT to "默认白",
+    ReadingTheme.EYE_CARE to "护眼绿",
+    ReadingTheme.SOFT_LIGHT to "柔光米黄",
+    ReadingTheme.NIGHT to "夜间黑"
+)
+
+/**
+ * 面板单选项（U3）：Modifier.selectable + RadioButton 角色（自带 selected 语义）+ stateDescription，
+ * 选中项末尾显示勾；整行 ≥ 48dp。
+ */
+@Composable
+private fun SheetRadioOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leading: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
+            .semantics { stateDescription = if (selected) "已选中" else "未选中" }
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        leading?.invoke()
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        if (selected) {
+            Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 
 /** 章节列表主体：按 Chapter.level 缩进展示嵌套层级，当前章节高亮（主色+加粗+selected 语义），点击跳转 */
@@ -360,78 +705,9 @@ internal fun ChapterListContent(
     }
 }
 
-/** 底部工具条：换行模式 / 字号 A- A+ / 行距 / 字体 / 阅读主题；epub 追加章节列表与翻章。按钮均 ≥48dp */
-@Composable
-private fun ReaderToolbar(
-    settings: ReadingSettings,
-    onToggleWrap: () -> Unit,
-    onFontSizeStep: (Int) -> Unit,
-    onCycleLineHeight: () -> Unit,
-    onCycleFont: () -> Unit,
-    onCycleTheme: () -> Unit,
-    isEpub: Boolean = false,
-    onChapterList: (() -> Unit)? = null,
-    onPrevChapter: (() -> Unit)? = null,
-    onNextChapter: (() -> Unit)? = null
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        ToolbarButton(
-            text = if (settings.wrapMode == WrapMode.WRAP) "自动换行" else "不换行",
-            description = "切换换行模式",
-            onClick = onToggleWrap
-        )
-        ToolbarButton(text = "A-", description = "减小字号", onClick = { onFontSizeStep(-1) })
-        ToolbarButton(text = "A+", description = "增大字号", onClick = { onFontSizeStep(1) })
-        ToolbarButton(
-            text = "行距 ${settings.lineHeightPercent}%",
-            description = "切换行距",
-            onClick = onCycleLineHeight
-        )
-        ToolbarButton(text = fontLabel(settings.font), description = "切换字体", onClick = onCycleFont)
-        ToolbarButton(text = themeLabel(settings.theme), description = "切换主题", onClick = onCycleTheme)
-        if (isEpub) {
-            if (onPrevChapter != null) {
-                ToolbarButton(text = "上一章", description = "上一章", onClick = onPrevChapter)
-            }
-            if (onChapterList != null) {
-                ToolbarButton(text = "章节", description = "章节列表", onClick = onChapterList)
-            }
-            if (onNextChapter != null) {
-                ToolbarButton(text = "下一章", description = "下一章", onClick = onNextChapter)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolbarButton(text: String, description: String, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .semantics { contentDescription = description }
-    ) {
-        Text(text)
-    }
-}
-
 private fun fontLabel(font: ReaderFont): String = when (font) {
     ReaderFont.CODE -> "代码"
     ReaderFont.SERIF -> "衬线"
     ReaderFont.SANS -> "无衬线"
     ReaderFont.CUSTOM -> "自定义"
-}
-
-private fun themeLabel(theme: ReadingTheme?): String = when (theme) {
-    null -> "跟随系统"
-    ReadingTheme.DEFAULT -> "默认白"
-    ReadingTheme.EYE_CARE -> "护眼绿"
-    ReadingTheme.SOFT_LIGHT -> "柔光米黄"
-    ReadingTheme.NIGHT -> "夜间黑"
 }

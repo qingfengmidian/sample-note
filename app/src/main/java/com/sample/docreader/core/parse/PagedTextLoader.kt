@@ -153,8 +153,14 @@ class PagedTextLoader private constructor(
          * 打开 [stream]（定位在文件开头）并完成编码探测，返回可逐块读取的加载器。
          * 探测所读的头部字节必须保留在流内语义中（不得吞掉）。
          * internal：CharsetProbe 为模块内可替换探测点（同 TxtParser 构造约定）。
+         * [charsetOverride] 非空时跳过探测级联、按指定编码流式解码（G1 手动切换编码，F2.6；
+         * 默认 null = 自动探测）；BOM 剥离规则与自动路径一致。
          */
-        internal fun open(stream: InputStream, probe: CharsetProbe = StrictUtf8Probe): PagedTextLoader {
+        internal fun open(
+            stream: InputStream,
+            probe: CharsetProbe = StrictUtf8Probe,
+            charsetOverride: Charset? = null
+        ): PagedTextLoader {
             val counting = CountingInputStream(stream)
             // 读 ≤ HEAD_BYTES 头部做编码探测（不足则到 EOF）
             val head = ByteArray(HEAD_BYTES)
@@ -165,7 +171,9 @@ class PagedTextLoader private constructor(
                 headLen += n
             }
             val headBytes = head.copyOf(headLen)
-            val charset = detectHeadCharset(headBytes, truncated = headLen == head.size, probe)
+            // G1：手动覆盖时跳过探测级联，直接使用指定编码
+            val charset = charsetOverride
+                ?: detectHeadCharset(headBytes, truncated = headLen == head.size, probe)
             // 剥离 BOM（UTF-8 3 字节 / UTF-16LE|BE 2 字节），首段不得含 \uFEFF
             val bomLen = when {
                 headLen >= 3 && head[0] == 0xEF.toByte() && head[1] == 0xBB.toByte() &&

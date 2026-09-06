@@ -36,11 +36,7 @@ class ReaderEditableTest {
             ReaderContent(
                 state = ReaderUiState(loading = false, document = txtDocument, editable = editable),
                 onBack = {},
-                onToggleWrap = {},
-                onFontSizeStep = { _ -> },
-                onCycleLineHeight = {},
-                onCycleFont = {},
-                onCycleTheme = {}
+                onFontSizeStep = { _ -> }
             )
         }
         composeRule.waitForIdle()

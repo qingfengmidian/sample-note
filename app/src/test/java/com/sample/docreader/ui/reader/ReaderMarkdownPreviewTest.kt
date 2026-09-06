@@ -46,11 +46,7 @@ class ReaderMarkdownPreviewTest {
             ReaderContent(
                 state = ReaderUiState(loading = false, document = document),
                 onBack = {},
-                onToggleWrap = {},
                 onFontSizeStep = { _ -> },
-                onCycleLineHeight = {},
-                onCycleFont = {},
-                onCycleTheme = {},
                 listState = listState,
                 onFirstVisibleParagraphChanged = onFirstVisibleParagraphChanged
             )

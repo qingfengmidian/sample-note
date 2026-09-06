@@ -5,10 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.text.font.FontFamily
 import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
@@ -25,6 +22,8 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * TC-UI-03：主题/字体切换即时生效，色值与 ReadingTheme 枚举一致。
+ * M10（F4.4）改版后：切换入口迁至阅读设置面板（TC-UI-06 直驱 ReaderSettingsSheetContent 验证回调触发），
+ * 这里保留 ReaderContent 直驱、通过新回调 onSetTheme/onSetFont 触发切换，断言对象（即时生效）不变。
  * 断言走自定义语义键（见 ReaderTextView），不用像素截图（Robolectric 下 captureToImage 不可靠）。
  * NATIVE 图形模式：LEGACY 下矢量图标绘制会 NPE。
  */
@@ -51,15 +50,14 @@ class ReaderThemeFontTest {
     @Test
     fun themeSwitch_appliesColorsImmediately() {
         var settings by mutableStateOf(ReadingSettings(theme = ReadingTheme.EYE_CARE))
+        var fireTheme: ((ReadingTheme?) -> Unit)? = null
         composeRule.setContent {
+            fireTheme = { theme -> settings = settings.copy(theme = theme) }
             ReaderContent(
                 state = ReaderUiState(loading = false, document = document, settings = settings),
                 onBack = {},
-                onToggleWrap = {},
                 onFontSizeStep = { _ -> },
-                onCycleLineHeight = {},
-                onCycleFont = {},
-                onCycleTheme = { settings = settings.copy(theme = ReadingTheme.SOFT_LIGHT) }
+                onSetTheme = { t -> fireTheme?.invoke(t) }
             )
         }
         composeRule.waitForIdle()
@@ -70,8 +68,8 @@ class ReaderThemeFontTest {
             assertEquals(ReadingTheme.EYE_CARE.foreground, fg)
         }
 
-        // 切换柔光米黄 → 重组后即时生效（按钮在工具条右侧，先滚动到可见再点击）
-        composeRule.onNodeWithContentDescription("切换主题").performScrollTo().performClick()
+        // 经 ReaderContent 新回调触发主题切换（与面板单选 → onSelectTheme 同一入口）→ 重组后即时生效
+        composeRule.runOnIdle { fireTheme!!.invoke(ReadingTheme.SOFT_LIGHT) }
         composeRule.waitForIdle()
         assertEquals(ReadingTheme.SOFT_LIGHT, settings.theme)
         contentColors().let { (bg, fg, _) ->
@@ -89,21 +87,21 @@ class ReaderThemeFontTest {
         assertEquals(FontFamily.Monospace, fontFamilyOf(ReaderFont.CUSTOM))
 
         var settings by mutableStateOf(ReadingSettings(font = ReaderFont.CODE))
+        var fireFont: ((ReaderFont) -> Unit)? = null
         composeRule.setContent {
+            fireFont = { font -> settings = settings.copy(font = font) }
             ReaderContent(
                 state = ReaderUiState(loading = false, document = document, settings = settings),
                 onBack = {},
-                onToggleWrap = {},
                 onFontSizeStep = { _ -> },
-                onCycleLineHeight = {},
-                onCycleFont = { settings = settings.copy(font = ReaderFont.SERIF) },
-                onCycleTheme = {}
+                onSetFont = { f -> fireFont?.invoke(f) }
             )
         }
         composeRule.waitForIdle()
         assertEquals(FontFamily.Monospace, contentColors().third)
 
-        composeRule.onNodeWithContentDescription("切换字体").performScrollTo().performClick()
+        // 经 ReaderContent 新回调触发字体切换（与面板单选 → onSelectFont 同一入口）→ 即时生效
+        composeRule.runOnIdle { fireFont!!.invoke(ReaderFont.SERIF) }
         composeRule.waitForIdle()
         assertEquals(ReaderFont.SERIF, settings.font)
         assertEquals(FontFamily.Serif, contentColors().third)

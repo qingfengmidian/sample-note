@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.sample.docreader.BuildConfig
 import java.io.FileNotFoundException
 import java.io.InputStream
 
@@ -31,15 +32,26 @@ class ContentResolverFileOpener(private val resolver: ContentResolver) : FileOpe
 
 /**
  * 按 scheme 分发的 FileOpener：asset:/// 走 debug fixtures 桩（M3 开发入口保留），
- * 其余走 SAF/ContentResolver。M5+ 全量切换后可移除 asset 分支。
+ * 其余走 SAF/ContentResolver。
+ * U6（M10）：asset 分支仅在 debug 构建可用（BuildConfig.DEBUG 门控）；release 遇 asset URI
+ * 直接走"文件不可访问"路径（FileNotFoundException → UI 提示无权限/已被移动）。
  */
 class DelegatingFileOpener(context: Context) : FileOpener {
     private val assetsOpener = AssetsFileOpener(context.assets)
     private val safOpener = ContentResolverFileOpener(context.contentResolver)
 
-    override fun open(uri: String): InputStream =
-        if (uri.startsWith("asset:///")) assetsOpener.open(uri) else safOpener.open(uri)
+    /** asset URI 是否可用（仅 debug；U6 门控） */
+    private fun assetEnabled(uri: String) = BuildConfig.DEBUG && uri.startsWith("asset:///")
 
-    override fun length(uri: String): Long? =
-        if (uri.startsWith("asset:///")) assetsOpener.length(uri) else safOpener.length(uri)
+    override fun open(uri: String): InputStream = when {
+        assetEnabled(uri) -> assetsOpener.open(uri)
+        uri.startsWith("asset:///") -> throw FileNotFoundException("asset 入口仅 debug 构建可用：$uri")
+        else -> safOpener.open(uri)
+    }
+
+    override fun length(uri: String): Long? = when {
+        assetEnabled(uri) -> assetsOpener.length(uri)
+        uri.startsWith("asset:///") -> null // release 下 asset 不可用，长度未知
+        else -> safOpener.length(uri)
+    }
 }

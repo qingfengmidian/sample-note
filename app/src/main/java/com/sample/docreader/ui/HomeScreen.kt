@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sample.docreader.BuildConfig
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -122,7 +123,11 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("简易文档") },
                 actions = {
-                    TextButton(onClick = onOpenFixtures) { Text("测试样本") }
+                    // U6（M10）：测试样本入口仅 debug 构建显示（fixtures 路由已按 BuildConfig.DEBUG 注册，
+                    // release 下按钮不门控会点到死路由）；Robolectric 单测跑 debug 变体，门控不影响现有 fixtures 测试
+                    if (BuildConfig.DEBUG) {
+                        TextButton(onClick = onOpenFixtures) { Text("测试样本") }
+                    }
                     TextButton(onClick = onOpenSettings) { Text("设置") }
                 }
             )
@@ -135,13 +140,28 @@ fun HomeScreen(
                 .padding(padding)
         ) {
             if (state.recent.isEmpty()) {
-                Text(
-                    "暂无最近文件，点击下方\"打开文件\"选择文档",
-                    style = MaterialTheme.typography.bodyMedium,
+                // U7（M10）：空态——提示文案下方直接给可点击「打开文件」主操作（复用下方同一 SAF launcher，
+                // ≥48dp + contentDescription），避免空态只有文字无可点引导
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
-                )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "暂无最近文件，点击下方\"打开文件\"选择文档",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Button(
+                        onClick = { launcher.launch(arrayOf("text/*", "application/epub+zip", "*/*")) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .semantics { contentDescription = "打开文件" }
+                    ) {
+                        Text("打开文件")
+                    }
+                }
             } else {
                 Text(
                     "最近打开",
@@ -168,14 +188,17 @@ fun HomeScreen(
                     }
                 }
             }
-            Button(
-                onClick = { launcher.launch(arrayOf("text/*", "application/epub+zip", "*/*")) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .defaultMinSize(minHeight = 48.dp)
-            ) {
-                Text("打开文件")
+            // 底部"打开文件"主操作：列表非空时保留固定入口；空态时由上方 U7 主操作承接，避免重复同一可点引导
+            if (state.recent.isNotEmpty()) {
+                Button(
+                    onClick = { launcher.launch(arrayOf("text/*", "application/epub+zip", "*/*")) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .defaultMinSize(minHeight = 48.dp)
+                ) {
+                    Text("打开文件")
+                }
             }
             // 新建文件入口（F3.5/TC-F3-08）：选择 md/txt 后由系统选择器命名
             Button(

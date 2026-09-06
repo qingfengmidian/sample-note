@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- U2（M10）：DayNight 资源对——浅色父主题；深色变体见 values-night/themes.xml。
+     不引入 appcompat，直接用 framework 的 Material NoActionBar 父主题。 -->
+<resources>
+    <style name="Theme.DocReader" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

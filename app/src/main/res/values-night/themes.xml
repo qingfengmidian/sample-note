@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- U2（M10）：深色变体——夜间模式使用 framework 深色 Material 父主题，
+     窗口底色/系统栏配色随系统深浅色切换，避免夜间黑阅读主题下出现亮边。 -->
+<resources>
+    <style name="Theme.DocReader" parent="android:Theme.Material.NoActionBar" />
+</resources>

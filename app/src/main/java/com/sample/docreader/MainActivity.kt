@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -26,6 +27,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // U2（M10）：沉浸式——正文绘制延伸至状态栏/导航栏后方，系统栏配色由阅读界面跟随主题（见 ReaderScreen）
+        enableEdgeToEdge()
         handleViewIntent(intent)
         setContent {
             AppTheme {
@@ -87,20 +90,23 @@ class MainActivity : ComponentActivity() {
                     composable("settings") {
                         SettingsScreen(onBack = { navController.popBackStack() })
                     }
-                    composable("fixtures") {
-                        FixtureEntryScreen(
-                            onOpenFixture = { name ->
-                                val format = when (name.substringAfterLast('.', "")) {
-                                    "md" -> DocFormat.MD
-                                    "xml" -> DocFormat.XML
-                                    else -> DocFormat.TXT
-                                }
-                                navController.navigate(
-                                    "reader/${format.name}/${Uri.encode("asset:///fixtures/$name")}/${Uri.encode(name)}"
-                                )
-                            },
-                            onOpenSettings = { navController.navigate("settings") }
-                        )
+                    // U6（M10）：fixtures 开发入口仅 debug 构建注册，release 包无此路由
+                    if (BuildConfig.DEBUG) {
+                        composable("fixtures") {
+                            FixtureEntryScreen(
+                                onOpenFixture = { name ->
+                                    val format = when (name.substringAfterLast('.', "")) {
+                                        "md" -> DocFormat.MD
+                                        "xml" -> DocFormat.XML
+                                        else -> DocFormat.TXT
+                                    }
+                                    navController.navigate(
+                                        "reader/${format.name}/${Uri.encode("asset:///fixtures/$name")}/${Uri.encode(name)}"
+                                    )
+                                },
+                                onOpenSettings = { navController.navigate("settings") }
+                            )
+                        }
                     }
                 }
             }

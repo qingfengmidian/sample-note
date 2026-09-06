@@ -46,11 +46,7 @@ class ReaderSelectionTest {
             ReaderContent(
                 state = ReaderUiState(loading = false, document = document, settings = settings),
                 onBack = {},
-                onToggleWrap = {},
-                onFontSizeStep = { _ -> },
-                onCycleLineHeight = {},
-                onCycleFont = {},
-                onCycleTheme = {}
+                onFontSizeStep = { _ -> }
             )
         }
         composeRule.waitForIdle()

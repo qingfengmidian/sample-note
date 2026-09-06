@@ -70,13 +70,21 @@ internal object TextDecoding {
     /** 解码并逐行分段（段落 = 行结构）；循环内 ensureActive 响应协程取消 */
     suspend fun toParagraphs(bytes: ByteArray, probe: CharsetProbe): Pair<Charset, List<String>> {
         val charset = detectCharset(bytes, probe)
+        return charset to toParagraphsWith(bytes, charset)
+    }
+
+    /**
+     * 按指定 [charset] 解码并逐行分段（G1 手动编码覆盖，F2.6）：跳过探测级联。
+     * 循环内 ensureActive 响应协程取消。
+     */
+    suspend fun toParagraphsWith(bytes: ByteArray, charset: Charset): List<String> {
         val lines = decode(bytes, charset).lines()
         val paragraphs = ArrayList<String>(lines.size)
         for (line in lines) {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             paragraphs += line
         }
-        return charset to paragraphs
+        return paragraphs
     }
 
     /** 严格模式校验能否无损解码（REPORT 遇错即失败） */
@@ -101,10 +109,22 @@ class TxtParser internal constructor(
         return parseBytes(bytes, name, uri.toString())
     }
 
-    /** 直接喂字节解析（单测不经 ContentResolver） */
-    internal suspend fun parseBytes(bytes: ByteArray, name: String, uri: String = name): Document =
+    /**
+     * 直接喂字节解析（单测不经 ContentResolver）。
+     * [charsetOverride] 非空时跳过编码探测、按指定编码解码（G1 手动切换编码，F2.6；默认 null = 自动探测）。
+     */
+    internal suspend fun parseBytes(
+        bytes: ByteArray,
+        name: String,
+        uri: String = name,
+        charsetOverride: Charset? = null
+    ): Document =
         withContext(Dispatchers.IO) {
-            val (_, paragraphs) = TextDecoding.toParagraphs(bytes, probe)
+            val paragraphs = if (charsetOverride != null) {
+                TextDecoding.toParagraphsWith(bytes, charsetOverride)
+            } else {
+                TextDecoding.toParagraphs(bytes, probe).second
+            }
             Document(uri, name, DocFormat.TXT, listOf(Chapter(null, paragraphs)))
         }
 

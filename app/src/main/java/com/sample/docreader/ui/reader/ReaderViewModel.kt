@@ -30,7 +30,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.FileNotFoundException
+import java.nio.charset.Charset
 
 /** 阅读界面状态（设计§3.3：ReaderViewModel 向 UI 暴露单个 StateFlow） */
 data class ReaderUiState(
@@ -42,7 +44,8 @@ data class ReaderUiState(
     val restoreParagraph: Int? = null,     // 加载/切章后待滚动到的段落索引（一次性）
     val editable: Boolean = true,          // 文件 ≤2MB 可编辑，超出只读（TC-F3-09，设计§8；真机验证 1.35MB 可编辑，5MB 触发 ANR）
     val hasMore: Boolean = false,          // txt 分块加载：还有未加载段落（M8b，F4.2）
-    val loadingMore: Boolean = false       // txt 分块加载：正在追加下一块（防重入）
+    val loadingMore: Boolean = false,      // txt 分块加载：正在追加下一块（防重入）
+    val encodingOverride: String? = null   // G1（F2.6）：txt 手动编码覆盖的 charset 名；null = 自动探测（会话内有效，不持久化）
 )
 
 /**
@@ -61,6 +64,9 @@ class ReaderViewModel(
 
     private var currentUri: String = ""
     private var currentParagraph: Int = 0
+
+    /** G1（F2.6）：txt 手动编码覆盖；null = 自动探测。仅会话内有效，不写 DataStore */
+    private var encodingOverride: Charset? = null
 
     /** G4-code：进度落库防抖——滚动期只记最新待写点，停顿 500ms 后一次性写 Room */
     private data class ProgressPoint(val uri: String, val chapter: Int, val paragraph: Int)
@@ -157,7 +163,7 @@ class ReaderViewModel(
         val name = displayName?.takeIf { it.isNotBlank() } ?: uri.substringAfterLast('/')
         val declaredLength = fileOpener.length(uri)
         val loader = withContext(Dispatchers.IO) {
-            PagedTextLoader.open(fileOpener.open(uri))
+            PagedTextLoader.open(fileOpener.open(uri), charsetOverride = encodingOverride)
         }
         pagedLoader = loader
         currentUri = uri
@@ -193,7 +199,8 @@ class ReaderViewModel(
 
     private suspend fun parseBytes(bytes: ByteArray, name: String, uri: String, format: DocFormat): Document =
         when (val parser = ParserFactory.forFormat(format)) {
-            is TxtParser -> parser.parseBytes(bytes, name, uri)
+            // G1：txt 手动编码覆盖同样作用于全量解析路径（当前 txt 一律走分页，本分支为防御性接线）
+            is TxtParser -> parser.parseBytes(bytes, name, uri, charsetOverride = encodingOverride)
             is PlainTextParser -> parser.parseBytes(bytes, name, uri)
             is EpubParser -> parser.parseBytes(bytes, name, uri)
             else -> throw ParseException.UnsupportedFormat()
@@ -307,9 +314,16 @@ class ReaderViewModel(
         it.copy(lineHeightPercent = LINE_HEIGHT_STEPS[(index + 1).mod(LINE_HEIGHT_STEPS.size)])
     }
 
-    /** 字体循环：代码→衬线→无衬线（CUSTOM 导入在 M4） */
+    /**
+     * 字体循环（SettingsScreen 循环入口用）：代码→衬线→无衬线；
+     * G2（M10）：customFontPath 非空时序列追加 CUSTOM（代码→衬线→无衬线→自定义→回到代码）。
+     */
     fun cycleFont() = updateSettings {
-        val order = listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
+        val order = if (it.customFontPath != null) {
+            listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS, ReaderFont.CUSTOM)
+        } else {
+            listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
+        }
         it.copy(font = order[(order.indexOf(it.font) + 1).mod(order.size)])
     }
 
@@ -318,6 +332,46 @@ class ReaderViewModel(
         val order = listOf(null, ReadingTheme.DEFAULT, ReadingTheme.EYE_CARE,
             ReadingTheme.SOFT_LIGHT, ReadingTheme.NIGHT)
         it.copy(theme = order[(order.indexOf(it.theme) + 1).mod(order.size)])
+    }
+
+    // ---- M10 阅读设置面板（F4.4）：直接设置方法（U3 单选/分段选择替代循环）；语义与 cycle/step 一致，即时生效并持久化 ----
+
+    /** 直接设置换行模式（阅读设置面板分段选择，F4.4） */
+    fun setWrapMode(mode: WrapMode) = updateSettings { it.copy(wrapMode = mode) }
+
+    /** 直接设置字体（阅读设置面板单选，F4.4/U3） */
+    fun setFont(font: ReaderFont) = updateSettings { it.copy(font = font) }
+
+    /** 直接设置阅读主题（null = 跟随系统；阅读设置面板单选，F4.4/U3） */
+    fun setTheme(theme: ReadingTheme?) = updateSettings { it.copy(theme = theme) }
+
+    /** 直接设置行距百分值（阅读设置面板单选，F4.4/U3；调用方传 LINE_HEIGHT_STEPS 档位值） */
+    fun setLineHeight(percent: Int) = updateSettings { it.copy(lineHeightPercent = percent) }
+
+    /**
+     * G2（M10）：自定义字体 SAF 导入成功后调用——切到 CUSTOM 并持久化路径，
+     * 同时删除上一版旧字体文件（孤儿文件清理）。**切换离开 CUSTOM 不删文件**（允许切回），故只在这里清理。
+     */
+    fun applyCustomFont(path: String) {
+        val oldPath = _uiState.value.settings.customFontPath
+        updateSettings { it.copy(font = ReaderFont.CUSTOM, customFontPath = path) }
+        if (oldPath != null && oldPath != path) File(oldPath).delete()
+    }
+
+    /**
+     * G1（F2.6）：txt 手动切换编码。[charsetName] 为 null 时恢复自动探测；
+     * 选择后即时重载当前 txt（小文件 parseBytes 路径与大文件 PagedTextLoader 路径统一经 load 生效）。
+     * 仅会话内有效，不全局持久化。非 txt 文档调用只更新状态不触发重载。
+     */
+    fun setEncodingOverride(charsetName: String?) {
+        encodingOverride = charsetName?.let { name ->
+            runCatching { charset(name) }.getOrNull()
+        }
+        _uiState.update { it.copy(encodingOverride = encodingOverride?.name()) }
+        val doc = _uiState.value.document
+        if (doc != null && doc.format == DocFormat.TXT && currentUri.isNotEmpty()) {
+            load(currentUri, DocFormat.TXT, doc.name)
+        }
     }
 
     companion object {

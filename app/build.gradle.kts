@@ -40,6 +40,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // U6（M10）：BuildConfig.DEBUG 门控"测试样本"入口与 asset 分支（release 无开发入口）
+        buildConfig = true
     }
 
     testOptions {

@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.sample.docreader.core.io.FileOpener
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ParseException
+import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
 import com.sample.docreader.core.progress.ProgressRepository
@@ -376,5 +377,122 @@ class ReaderViewModelTest {
         vm.load("asset:///fixtures/sample_utf8.txt", DocFormat.TXT)
         awaitLoaded(vm)
         assertTrue("正常小文件应可编辑", vm.uiState.value.editable)
+    }
+
+    /**
+     * G1（F2.6）：txt 手动编码覆盖——setEncodingOverride 非空覆盖即时重载并按该编码解码；
+     * 置 null 恢复自动探测回到探测结果（会话内有效，不持久化）。
+     * 用 GBK fixture（含 GBK 特有字符"镕"）驱动：自动探测判 GBK 正确解码；
+     * 覆盖 UTF-8 后重载结果与"同字节按 UTF-8 黄金解码"一致且不同于自动探测结果（证明覆盖生效）；
+     * 置 null 后回到自动探测结果。
+     */
+    @Test
+    fun g1_encodingOverride_reloadAndReset() = runTest {
+        val (vm, _) = newViewModel(this)
+        vm.load("asset:///fixtures/sample_gbk.txt", DocFormat.TXT)
+        awaitLoaded(vm)
+        val autoParas = vm.uiState.value.document!!.chapters[0].paragraphs
+        assertTrue("自动探测应判 GBK 并正确解码", autoParas.any { it.contains("镕") })
+
+        // 黄金对照：同一批字节按 UTF-8 解码（String.decode 与 PagedTextLoader 同用 REPLACE 解码器）
+        val raw = javaClass.classLoader!!.getResourceAsStream("fixtures/sample_gbk.txt")!!.readBytes()
+        val goldenUtf8 = String(raw, Charsets.UTF_8).lines()
+
+        // 覆盖 UTF-8 → 即时重载，段落等于按 UTF-8 解码结果，且与自动探测（GBK）结果不同
+        vm.setEncodingOverride("UTF-8")
+        // 等待重载真正落地：loading 位在重载调度间隙可能短暂为 false，直接等到段落已切换为覆盖解码结果
+        // （即不同于自动探测结果），避免提前读到旧文档
+        waitUntilDocDiffersFrom(vm, autoParas)
+        assertEquals("UTF-8", vm.uiState.value.encodingOverride)
+        assertNull("覆盖重载不应报错", vm.uiState.value.error)
+        assertEquals("覆盖后应按指定编码（UTF-8）解码", goldenUtf8, vm.uiState.value.document!!.chapters[0].paragraphs)
+        assertTrue("覆盖解码结果应与自动探测不同", goldenUtf8 != autoParas)
+
+        // 置 null → 恢复自动探测，回到 GBK 正确解码结果
+        vm.setEncodingOverride(null)
+        waitUntilDocEquals(vm, autoParas)
+        assertNull(vm.uiState.value.encodingOverride)
+        assertEquals(autoParas, vm.uiState.value.document!!.chapters[0].paragraphs)
+    }
+
+    /** 轮询等待重载后的文档段落不再是 [stale]（覆盖生效的判据），防 loading 位调度间隙误判 */
+    private fun TestScope.waitUntilDocDiffersFrom(vm: ReaderViewModel, stale: List<String>) {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (vm.uiState.value.document?.chapters?.getOrNull(0)?.paragraphs == stale) {
+            advanceUntilIdle()
+            if (vm.uiState.value.document?.chapters?.getOrNull(0)?.paragraphs != stale) break
+            check(System.currentTimeMillis() < deadline) { "编码覆盖重载未落地" }
+            Thread.sleep(20)
+        }
+        advanceUntilIdle()
+    }
+
+    /** 轮询等待恢复自动探测后文档段落回到 [target] */
+    private fun TestScope.waitUntilDocEquals(vm: ReaderViewModel, target: List<String>) {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (vm.uiState.value.document?.chapters?.getOrNull(0)?.paragraphs != target) {
+            advanceUntilIdle()
+            if (vm.uiState.value.document?.chapters?.getOrNull(0)?.paragraphs == target) break
+            check(System.currentTimeMillis() < deadline) { "恢复自动探测重载未落地" }
+            Thread.sleep(20)
+        }
+        advanceUntilIdle()
+    }
+
+    /** G2（M10）：customFontPath 非空时 cycleFont 循环序列纳入 CUSTOM；为 null 维持三态循环 */
+    @Test
+    fun g2_cycleFont_includesCustomWhenPathSet() = runTest {
+        val (vm, _) = newViewModel(this)
+        advanceUntilIdle()
+
+        // 无 customFontPath：三态 CODE→SERIF→SANS→CODE
+        vm.setFont(ReaderFont.CODE)
+        vm.cycleFont()
+        assertEquals(ReaderFont.SERIF, vm.uiState.value.settings.font)
+        vm.cycleFont()
+        assertEquals(ReaderFont.SANS, vm.uiState.value.settings.font)
+        vm.cycleFont()
+        assertEquals(ReaderFont.CODE, vm.uiState.value.settings.font)
+
+        // 置 customFontPath（applyCustomFont 同时切到 CUSTOM）：四态序列 CODE→SERIF→SANS→CUSTOM→CODE
+        vm.applyCustomFont(tmpFolder.newFile("cycle_font.ttf").absolutePath)
+        assertEquals(ReaderFont.CUSTOM, vm.uiState.value.settings.font)
+        vm.cycleFont() // CUSTOM → CODE（从 CUSTOM 一步可达 CODE）
+        assertEquals(ReaderFont.CODE, vm.uiState.value.settings.font)
+        vm.setFont(ReaderFont.SANS)
+        vm.cycleFont() // SANS → CUSTOM
+        assertEquals(ReaderFont.CUSTOM, vm.uiState.value.settings.font)
+        vm.cycleFont() // CUSTOM → CODE
+        assertEquals(ReaderFont.CODE, vm.uiState.value.settings.font)
+    }
+
+    /**
+     * G2（M10）：applyCustomFont 重新导入成功后删除上一版旧字体文件（孤儿文件清理）；
+     * 切换离开 CUSTOM 不删文件（允许切回）。用临时目录构造，勿动真机 files/fonts。
+     */
+    @Test
+    fun g2_applyCustomFont_deletesOldFile_onlyOnReimport() = runTest {
+        val (vm, _) = newViewModel(this)
+        advanceUntilIdle()
+        val oldFile = tmpFolder.newFile("old_font.ttf")
+        val newFile = tmpFolder.newFile("new_font.ttf")
+
+        // 首次导入：仅记路径（无旧文件可清理）
+        vm.applyCustomFont(oldFile.absolutePath)
+        assertTrue(oldFile.exists())
+        assertEquals(oldFile.absolutePath, vm.uiState.value.settings.customFontPath)
+
+        // 重新导入成功：旧字体文件被删除、路径更新到新文件
+        vm.applyCustomFont(newFile.absolutePath)
+        assertFalse("重新导入成功后旧字体文件应被清理", oldFile.exists())
+        assertTrue(newFile.exists())
+        assertEquals(newFile.absolutePath, vm.uiState.value.settings.customFontPath)
+
+        // 切换离开 CUSTOM：不删除已导入的字体文件（允许切回）。
+        // 注意：settings 改动同步生效（updateSettings 先改 StateFlow），此处直接断言，不 advanceUntilIdle，
+        // 避免 DataStore 初始读的迟到回放覆盖掉刚写入的状态（与既有 settings 单测同约定）
+        vm.setFont(ReaderFont.SANS)
+        assertEquals(ReaderFont.SANS, vm.uiState.value.settings.font)
+        assertTrue("切换离开 CUSTOM 不应删除字体文件", newFile.exists())
     }
 }

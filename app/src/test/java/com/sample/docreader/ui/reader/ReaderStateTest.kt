@@ -30,11 +30,7 @@ class ReaderStateTest {
             ReaderContent(
                 state = state.copy(settings = settings),
                 onBack = {},
-                onToggleWrap = {},
-                onFontSizeStep = { _ -> },
-                onCycleLineHeight = {},
-                onCycleFont = {},
-                onCycleTheme = {}
+                onFontSizeStep = { _ -> }
             )
         }
         composeRule.waitForIdle()
