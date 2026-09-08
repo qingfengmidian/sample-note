@@ -261,6 +261,9 @@ object FixtureGenerator {
 
         // M11 新增（F2.14/TC-F2-17/17c/17d）：含图 epub 三件套（图片用程序生成的小位图，评审 S2/S12）
         imageEpubFixtures(dir)
+
+        // M11 新增（F2.15/TC-F2-17e/17f）：CSS 子集样式 epub 两件套
+        cssEpubFixtures(dir)
     }
 
     // ---------------- M11 含图 epub 夹具（F2.14） ----------------
@@ -397,6 +400,76 @@ object FixtureGenerator {
                     |""".trimMargin(),
                 "images/broken.png" to brokenPng
             ))
+    }
+
+    // ---------------- M11 新增（F2.15）CSS 子集样式 epub 夹具 ----------------
+
+    /**
+     * 1) styled.epub（TC-F2-17e）：`<style>` + 内联 style 覆盖字号/字重/斜体/对齐/颜色/段距。
+     *    章 1 段落索引 → 期望样式（与解析层测试/渲染合并严格对齐）：
+     *    [0] 居中大标题：h1(align center + bold) × .big(font-size 2em) → {bold,fontSizeEm2,align1}
+     *    [1] 引言：id=#intro → {color #CC0000, italic}
+     *    [2] 带段距：class=.note margin-top:1.2em → {paragraphSpacing=true}
+     *    [3] 行内：font-size 18pt(→1.5) + color #0000FF + bold + right → {fontSizeEm1.5,bold,align2,color蓝}
+     *    [4] 普通段落：无样式
+     *    [5][6] 列表项：li{margin:0} → 无段距无样式（0 档）
+     *    章 2 纯文本无样式（styles 空，验证仅 epub 样式章非空）。
+     */
+    private fun cssEpubFixtures(dir: File) {
+        epub(dir, "styled.epub",
+            opf(listOf("ch1.xhtml" to "", "ch2.xhtml" to ""), ncx = true, nav = false),
+            buildMap {
+                put("ch1.xhtml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <html xmlns="http://www.w3.org/1999/xhtml"><head><title>样式章</title>
+                    <style type="text/css">
+                    h1 { text-align: center; font-weight: bold; }
+                    .big { font-size: 2em; }
+                    #intro { color: #CC0000; font-style: italic; }
+                    li { margin-top: 0; margin-bottom: 0; }
+                    .note { margin-top: 1.2em; }
+                    </style></head>
+                    <body>
+                    <h1 class="big">居中大标题</h1>
+                    <p id="intro">引言文字内容。</p>
+                    <p class="note">带段间距的段落。</p>
+                    <p style="font-size: 18pt; color: #0000FF; font-weight: bold; text-align: right;">行内样式右对齐蓝字。</p>
+                    <p>普通段落无样式。</p>
+                    <ul><li>无序列表项一。</li><li>无序列表项二。</li></ul>
+                    </body></html>
+                """.trimIndent())
+                put("ch2.xhtml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <html xmlns="http://www.w3.org/1999/xhtml"><head><title>纯文本章</title></head>
+                    <body><p>第二章普通段落一。</p><p>第二章普通段落二。</p></body></html>
+                """.trimIndent())
+                put("toc.ncx", ncx(listOf("样式章" to "ch1.xhtml", "纯文本章" to "ch2.xhtml")))
+            })
+
+        // 2) bad_css.epub（TC-F2-17f）：样式表含非法语法/未知选择器混排——非法部分静默忽略，
+        //    合法子集（p 规则 color+font-size）仍生效，正文可读不崩溃。
+        epub(dir, "bad_css.epub",
+            opf(listOf("ch1.xhtml" to ""), ncx = true, nav = false),
+            buildMap {
+                put("ch1.xhtml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <html xmlns="http://www.w3.org/1999/xhtml"><head><title>坏样式章</title>
+                    <style type="text/css">
+                    ??? { color: red; }
+                    p { color: #222222; font-size: 24px; }
+                    .a .b { font-weight: bold; }
+                    p > span { font-style: italic; }
+                    @media screen { p { color: blue; } }
+                    .x { margin-left: 30px; }
+                    </style></head>
+                    <body>
+                    <p>正文第一段可读。</p>
+                    <p class="a b"><span>未知后代选择器不生效。</span></p>
+                    <p style="color: notacolor">非法颜色忽略、正文可读。</p>
+                    </body></html>
+                """.trimIndent())
+                put("toc.ncx", ncx(listOf("坏样式章" to "ch1.xhtml")))
+            })
     }
 
     private fun xhtml(title: String, body: String, encoding: String = "UTF-8") = """
@@ -568,7 +641,8 @@ object FixtureGenerator {
         listOf("sample.epub", "sample3.epub", "hybrid.epub", "many_chapters.epub",
             "nested_toc.epub", "mixed_encoding.epub", "bad_decl.epub", "broken.epub", "no_nav.epub",
             "malformed.epub", "nested_nav.epub", "bad_spine.epub",
-            "sample_images.epub", "sample_cover.epub", "broken_image.epub")
+            "sample_images.epub", "sample_cover.epub", "broken_image.epub",
+            "styled.epub", "bad_css.epub")
             .forEach { name ->
                 val e = entries(name)
                 check(e["mimetype"]?.toString(Charsets.US_ASCII) == "application/epub+zip",
@@ -654,6 +728,31 @@ object FixtureGenerator {
         check(brokenPngBytes.size == fullPngBytes &&
             brokenPngBytes.copyOfRange(0, 24).all { it == 0.toByte() },
             "broken_image.epub 的 broken.png 应为头部清零的损坏 PNG（体积不变、前 24 字节全 0，保证 BitmapFactory 解码必失败）")
+
+        // M11 新增（F2.15/TC-F2-17e/17f）：styled/bad_css 内容自检
+        val styledCh1 = entries("styled.epub")["OEBPS/ch1.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(styledCh1.contains("<style type=\"text/css\">") &&
+            styledCh1.contains("h1 { text-align: center; font-weight: bold; }") &&
+            styledCh1.contains(".big { font-size: 2em; }") &&
+            styledCh1.contains("#intro { color: #CC0000; font-style: italic; }") &&
+            styledCh1.contains("li { margin-top: 0; margin-bottom: 0; }") &&
+            styledCh1.contains("""<p style="font-size: 18pt; color: #0000FF; font-weight: bold; text-align: right;">"""),
+            "styled.epub 第 1 章应含 <style> 规则（h1/.big/#intro/li）与内联 style 行")
+        check(styledCh1.contains("居中大标题") && styledCh1.contains("无序列表项一。"),
+            "styled.epub 第 1 章正文应完整")
+        val styledCh2 = entries("styled.epub")["OEBPS/ch2.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(styledCh2.contains("第二章普通段落一。") && !styledCh2.contains("<style"),
+            "styled.epub 第 2 章应为无样式纯文本章")
+        check(entries("styled.epub").containsKey("OEBPS/toc.ncx"),
+            "styled.epub 应含 NCX 目录")
+
+        val badCssCh1 = entries("bad_css.epub")["OEBPS/ch1.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(badCssCh1.contains("??? { color: red; }") &&
+            badCssCh1.contains("@media screen") &&
+            badCssCh1.contains("p { color: #222222; font-size: 24px; }"),
+            "bad_css.epub 第 1 章应含非法语法（???/@media 段）与合法子集规则")
+        check(badCssCh1.contains("正文第一段可读。"),
+            "bad_css.epub 第 1 章正文应完整")
     }
 }
 

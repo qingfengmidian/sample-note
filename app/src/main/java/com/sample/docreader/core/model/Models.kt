@@ -20,8 +20,10 @@ data class Chapter(
     val title: String?,          // 无标题可为 null
     val paragraphs: List<String>,// 段落级纯文本，渲染/编辑的基础单位
     val level: Int = 1,          // 章节层级（1 起）：epub 目录嵌套用于章节列表缩进，单章格式恒为 1
-    val images: List<ParagraphImage> = emptyList() // F2.14 段落内图片（仅 epub 非空）：挂所属段落 item 内渲染，
-                                                   // 不新增 LazyColumn 项——段落索引稳定（评审 S8）
+    val images: List<ParagraphImage> = emptyList(), // F2.14 段落内图片（仅 epub 非空）：挂所属段落 item 内渲染，
+                                                    // 不新增 LazyColumn 项——段落索引稳定（评审 S8）
+    val styles: Map<Int, ParagraphStyleHints> = emptyMap() // F2.15 CSS 样式提示（仅 epub 非空；默认空表零影响）：
+                                                           // 段落索引 → 相对样式，LazyColumn item 索引 == 段落索引恒成立
 )
 
 /**
@@ -33,6 +35,21 @@ data class ParagraphImage(
     val src: String,
     val alt: String? = null,     // 无障碍语义描述来源（img @alt）；占位提示优先显示 alt
     val isCover: Boolean = false // 封面图（OPF cover 声明）：挂 paragraphIndex=0，按屏宽置顶渲染
+)
+
+/**
+ * CSS 子集相对样式提示（F2.15，设计 §3.1/§3.3）：全部为"相对全局设置的偏移/开关"，
+ * 渲染层负责与全局设置合并（全局字号/行距/字体/主题为**绝对基准**）。
+ * null = 未指定（走全局/默认）；bold/italic 用 Boolean? 三态以支持"显式非粗/非斜"覆盖继承语义。
+ */
+data class ParagraphStyleHints(
+    val fontSizeEm: Float? = null,       // 相对字号倍率（如 1.2f）；渲染时 clamp 0.5~3.0 后乘全局字号
+    val lineHeightEm: Float? = null,     // 相对行距倍率；同上 clamp 后乘全局行距
+    val bold: Boolean? = null,           // null 未指定；true 加粗 / false 非粗
+    val italic: Boolean? = null,         // null 未指定；true 斜体 / false 非斜
+    val textAlign: Int? = null,          // 0 左 1 中 2 右（text-align 子集）；null 未指定
+    val colorArgb: Int? = null,          // CSS 颜色（#AARRGGBB，不透明 alpha=FF）；对比度 <4.5:1 由渲染层回退主题前景色
+    val paragraphSpacing: Boolean = false // margin/padding 垂直分量 0/非 0 两档段距（true = 非 0，item 间加段距）
 )
 
 /**

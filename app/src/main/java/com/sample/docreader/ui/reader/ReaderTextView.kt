@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -41,10 +42,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sample.docreader.core.model.ParagraphImage
+import com.sample.docreader.core.model.ParagraphStyleHints
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
@@ -92,12 +98,82 @@ fun fontFamilyFor(font: ReaderFont, customFontPath: String?): FontFamily {
 internal fun lineHeightSp(settings: ReadingSettings) =
     (settings.fontSizeSp * settings.lineHeightPercent / 100).sp
 
+// ---------------- F2.15 样式合并（设计 §3.3「样式合并规则」，纯函数可单测） ----------------
+
+/** CSS 相对倍率 clamp 0.5~3.0（设计 §3.3/F2.15） */
+internal fun clampStyleEm(value: Float): Float = value.coerceIn(0.5f, 3.0f)
+
+/** WCAG 相对亮度（评审附录）：sRGB 通道线性化后加权和 */
+private fun channelLuminance(c: Int): Double {
+    val v = c / 255.0
+    return if (v <= 0.03928) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4)
+}
+
+private fun argbLuminance(argb: Int): Double =
+    0.2126 * channelLuminance((argb shr 16) and 0xFF) +
+        0.7152 * channelLuminance((argb shr 8) and 0xFF) +
+        0.0722 * channelLuminance(argb and 0xFF)
+
+/** WCAG 对比度 (L1+0.05)/(L2+0.05)，L1 ≥ L2 */
+internal fun wcagContrast(fgArgb: Int, bgArgb: Int): Double {
+    val l1 = argbLuminance(fgArgb)
+    val l2 = argbLuminance(bgArgb)
+    val hi = maxOf(l1, l2)
+    val lo = minOf(l1, l2)
+    return (hi + 0.05) / (lo + 0.05)
+}
+
+/** CSS 前景色与主题背景对比度 ≥ 4.5:1 才保留；否则渲染层回退主题前景色（无障碍硬要求） */
+internal fun keepCssColor(cssArgb: Int, bgArgb: Int): Boolean = wcagContrast(cssArgb, bgArgb) >= 4.5
+
+/** argb Int → Compose Color（避免 ARGB 顺序错误，模型用 Int 存储） */
+internal fun argbToColor(argb: Int): Color = Color(argb.toLong() and 0xFFFFFFFFL)
+
+private fun scaleTextUnit(v: TextUnit, ratio: Float): TextUnit =
+    if (v == TextUnit.Unspecified) v else (v.value * ratio).sp
+
+/**
+ * 单段样式合并：全局设置为**绝对基准**，CSS 仅相对偏移（设计 §3.3）。
+ * - fontSizeEm/lineHeightEm clamp 0.5~3.0 后乘全局值；仅字号变化时行距随字号等比缩放以保持全局行距比例；
+ * - bold/italic/textAlign 直接采用（null 不动）；
+ * - colorArgb 与主题背景对比度 < 4.5:1 回退主题前景色；
+ * - hints == null → 原样（styles 空/无样式 epub 路径零改动）。
+ */
+internal fun applyParagraphHints(
+    base: TextStyle,
+    hints: ParagraphStyleHints?,
+    theme: ReadingTheme
+): TextStyle {
+    if (hints == null) return base
+    val bgArgb = theme.background.toArgb()
+    val fontSizeRatio = hints.fontSizeEm?.let { clampStyleEm(it) }
+    val lineHeightRatio = hints.lineHeightEm?.let { clampStyleEm(it) }
+    var ts = base
+    val fontSize = if (fontSizeRatio != null) scaleTextUnit(base.fontSize, fontSizeRatio) else base.fontSize
+    val lineHeight = when {
+        lineHeightRatio != null -> scaleTextUnit(base.lineHeight, lineHeightRatio)
+        fontSizeRatio != null -> scaleTextUnit(base.lineHeight, fontSizeRatio)
+        else -> base.lineHeight
+    }
+    ts = ts.copy(fontSize = fontSize, lineHeight = lineHeight)
+    hints.bold?.let { ts = ts.copy(fontWeight = if (it) FontWeight.Bold else FontWeight.Normal) }
+    hints.italic?.let { ts = ts.copy(fontStyle = if (it) FontStyle.Italic else FontStyle.Normal) }
+    hints.textAlign?.let { ts = ts.copy(textAlign = when (it) { 0 -> TextAlign.Left; 1 -> TextAlign.Center; else -> TextAlign.Right }) }
+    hints.colorArgb?.let { cssArgb ->
+        if (keepCssColor(cssArgb, bgArgb)) ts = ts.copy(color = argbToColor(cssArgb))
+    }
+    return ts
+}
+
+
 /**
  * 阅读排版组件（设计§3.3 + §3.3 epub 富文本 F2.14）：
  * - WRAP：段落 Text 充满宽度自然折行；NO_WRAP：每段放入可水平滚动的 Row，整行绘制；
  *   两种模式段落间都分行；
  * - F2.14 图片：渲染在所属段落 item 内（**不新增 LazyColumn 项**，item 索引 == 段落索引不变量，评审 S8）——
  *   封面图（isCover）在首段文字上方，其余图在所属段落文字下方；svg/解码失败/文件缺失给占位提示（S9 语义）；
+ * - F2.15 样式：styles[段落索引] 仅作用于该段落 Text 的 TextStyle（合并规则见 [applyParagraphHints]）；
+ *   段距只做 0/非 0 两档（item 垂直内边距），styles 空（txt/md/xml/无样式 epub）路径与旧版一致；
  * - 背景色应用容器、前景色应用正文 Text；整体包 SelectionContainer 支持长按选择复制（F2.12）。
  */
 @Composable
@@ -107,6 +183,7 @@ fun ReaderTextView(
     listState: LazyListState,
     images: List<ParagraphImage> = emptyList(),
     imageRoot: String? = null,
+    styles: Map<Int, ParagraphStyleHints> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     val theme = resolveReadingTheme(settings.theme)
@@ -136,20 +213,24 @@ fun ReaderTextView(
                 val itemImages = imagesByParagraph[itemIndex].orEmpty()
                 val covers = itemImages.filter { it.isCover }      // 封面：该段文字上方
                 val below = itemImages.filter { !it.isCover }      // 正文图：该段文字下方
+                // F2.15：本段样式合并 + 0/非 0 两档段距（非 0 段距加大 item 垂直内边距）
+                val hints = styles[itemIndex]
+                val paragraphStyle = applyParagraphHints(textStyle, hints, theme)
+                val itemVerticalPad = if (hints?.paragraphSpacing == true) 8.dp else 4.dp
                 Column(modifier = Modifier.fillMaxWidth()) {
                     covers.forEach {
                         ChapterImage(it, imageRoot, theme.foreground, imageVerticalPad = 4.dp)
                     }
                     val itemModifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = 16.dp, vertical = itemVerticalPad)
                     when (settings.wrapMode) {
-                        WrapMode.WRAP -> Text(paragraph, style = textStyle, modifier = itemModifier)
+                        WrapMode.WRAP -> Text(paragraph, style = paragraphStyle, modifier = itemModifier)
                         WrapMode.NO_WRAP ->
                             Row(itemModifier.horizontalScroll(rememberScrollState())) {
                                 Text(
                                     paragraph,
-                                    style = textStyle,
+                                    style = paragraphStyle,
                                     softWrap = false,
                                     maxLines = Int.MAX_VALUE
                                 )

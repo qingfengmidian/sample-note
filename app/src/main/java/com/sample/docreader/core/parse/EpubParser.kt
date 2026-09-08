@@ -6,6 +6,7 @@ import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.Document
 import com.sample.docreader.core.model.ParagraphImage
+import com.sample.docreader.core.model.ParagraphStyleHints
 import com.sample.docreader.core.model.ParseException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -17,13 +18,347 @@ import java.io.File
 import java.io.IOException
 import java.util.zip.ZipInputStream
 
+// ---------------- F2.15 CSS 子集（《软件设计文档》§3.2-6） ----------------
+
+/** 行内元素集：不在段落边界触发 flush，也不作为段样式归属（整段样式取最近的块级祖先） */
+private val inlineTags = setOf(
+    "a", "abbr", "b", "bdi", "bdo", "big", "cite", "code", "del", "dfn", "em",
+    "font", "i", "ins", "kbd", "label", "mark", "q", "ruby", "rp", "rt", "s",
+    "samp", "small", "span", "strike", "strong", "sub", "sup", "time", "tt", "u", "var", "wbr"
+)
+
+/** 空/自闭合元素（不压样式帧、结束标签不 flush 不 pop）：img 在抽取处单独处理；br/hr 为段落边界在 START 处单独 flush */
+private val voidTags = setOf(
+    "meta", "link", "base", "input", "source", "area", "track", "param", "col", "br", "hr"
+)
+
+/** 支持的选择器：元素 / element.class / .class / #id（后代/组合/伪类/@ 等一律忽略） */
+internal data class CssSelector(
+    val tag: String? = null,      // 元素选择器（小写）；null = 无元素限定
+    val className: String? = null,
+    val idName: String? = null
+) {
+    /** 近似优先级分值（子集内至少一个 id/class/元素）：id > element.class > class > element */
+    fun specificity(): Int = (if (idName != null) 100 else 0) + (if (className != null) 10 else 0) + (if (tag != null) 1 else 0)
+}
+
+/** 一条规则的已解析声明（原始值；长度/颜色等在帧构建时结合父级上下文换算）。spacing 为 margin/padding 垂直分量合并档位 */
+internal class CssDecls(
+    var fontSizeRaw: String? = null,
+    var lineHeightRaw: String? = null,
+    var weightRaw: String? = null,
+    var styleRaw: String? = null,
+    var alignRaw: String? = null,
+    var colorRaw: String? = null,
+    var spacing: Boolean? = null
+) {
+    /** 层叠覆盖：后定义/更高优先级声明非空即覆盖（CSS 属性级 last-wins） */
+    fun overrideWith(o: CssDecls) {
+        o.fontSizeRaw?.let { fontSizeRaw = it }
+        o.lineHeightRaw?.let { lineHeightRaw = it }
+        o.weightRaw?.let { weightRaw = it }
+        o.styleRaw?.let { styleRaw = it }
+        o.alignRaw?.let { alignRaw = it }
+        o.colorRaw?.let { colorRaw = it }
+        o.spacing?.let { spacing = it }
+    }
+}
+
+/** 一条样式规则：selector 为 null 表示该选择器不在子集（调用方已忽略），declarations 为声明 */
+internal class CssRule(
+    val selector: CssSelector,
+    val declarations: CssDecls,
+    val order: Int // 定义先后（后定义覆盖先定义）
+)
+
+/**
+ * F2.15 CSS 子集解析（纯函数，无 Android 依赖）：
+ * 选择器仅元素 / element.class / .class / #id；属性仅 font-size/line-height/font-weight/font-style/
+ * text-align/color/margin·padding 垂直分量；一切未识别属性/选择器静默忽略；解析失败不抛异常。
+ */
+internal object CssSubset {
+
+    private val tokenRe = Regex("[A-Za-z0-9_\\-]+")
+    private val lengthRe = Regex("^(-?\\d+(\\.\\d+)?|\\.\\d+)([a-z%]*)$")
+    private val importantRe = Regex("\\s*!important\\s*$")
+    private val verticalProps = setOf(
+        "margin-top", "margin-bottom", "padding-top", "padding-bottom", "margin", "padding"
+    )
+
+    private val namedColors = mapOf(
+        "black" to 0x000000, "silver" to 0xC0C0C0, "gray" to 0x808080, "grey" to 0x808080,
+        "white" to 0xFFFFFF, "maroon" to 0x800000, "red" to 0xFF0000, "purple" to 0x800080,
+        "fuchsia" to 0xFF00FF, "green" to 0x008000, "lime" to 0x00FF00, "olive" to 0x808000,
+        "yellow" to 0xFFFF00, "navy" to 0x000080, "blue" to 0x0000FF, "teal" to 0x008080,
+        "aqua" to 0x00FFFF, "orange" to 0xFFA500
+    )
+
+    /** 选择器解析：仅支持四种；其余（后代/组合/伪类/属性/@ 等）返回 null 静默忽略 */
+    fun parseSelector(raw: String): CssSelector? {
+        val s = raw.trim()
+        if (s.isEmpty()) return null
+        if (s.any { it in " \t\n>+~[]*:()@&^$=|,{}!;\"'" }) return null
+        return when {
+            s.startsWith('#') -> {
+                val id = s.substring(1)
+                if (id.isNotEmpty() && tokenRe.matches(id)) CssSelector(idName = id) else null
+            }
+            s.startsWith('.') -> {
+                val c = s.substring(1)
+                if (c.isNotEmpty() && !c.contains('.') && tokenRe.matches(c)) CssSelector(className = c) else null
+            }
+            s.contains('.') -> {
+                // element.class（仅允许一个点）
+                val idx = s.indexOf('.')
+                if (s.indexOf('.', idx + 1) != -1) return null
+                val tag = s.substring(0, idx)
+                val c = s.substring(idx + 1)
+                if (c.isEmpty() || c.contains('.')) return null
+                if (!tokenRe.matches(c)) return null
+                if (tag.isNotEmpty() && !tokenRe.matches(tag)) return null
+                CssSelector(tag = tag.lowercase().ifEmpty { null }, className = c)
+            }
+            else -> if (tokenRe.matches(s)) CssSelector(tag = s.lowercase()) else null
+        }
+    }
+
+    /**
+     * 长度 → 相对 16sp 基准的**绝对倍率**（设计 §3.2-6）：
+     * px/pt 与父级无关（24px=18pt=1.5×基准）；em/% 及（行距）无单位为相对父级乘子。
+     * 支持单位之外的输入（rem/关键字等）返回 null。
+     */
+    fun lengthToEm(raw: String, parentEm: Float, allowUnitless: Boolean): Float? {
+        val v = raw.trim().lowercase()
+        if (v.isEmpty()) return null
+        val num: Float
+        val unit: String
+        when {
+            v.endsWith("%") -> {
+                num = v.dropLast(1).toFloatOrNull() ?: return null
+                return parentEm * num / 100f
+            }
+            v.endsWith("em") -> {
+                num = v.dropLast(2).toFloatOrNull() ?: return null
+                return parentEm * num
+            }
+            v.endsWith("px") -> {
+                num = v.dropLast(2).toFloatOrNull() ?: return null
+                return num / 16f // 16sp 基准
+            }
+            v.endsWith("pt") -> {
+                num = v.dropLast(2).toFloatOrNull() ?: return null
+                return num * 4f / 3f / 16f // 1pt = 4/3 px
+            }
+            else -> {
+                if (!allowUnitless) return null // 字号不允许无单位
+                num = v.toFloatOrNull() ?: return null
+                return parentEm * num
+            }
+        }
+    }
+
+    /** 字重：≥600 或 bold/bolder → true（粗）；normal/lighter/<600 → false（非粗）；不可解析 → null */
+    fun weightToBold(raw: String): Boolean? {
+        val v = raw.trim().lowercase()
+        if (v == "bold" || v == "bolder") return true
+        if (v == "normal" || v == "lighter") return false
+        val n = v.toFloatOrNull() ?: return null
+        return n >= 600f
+    }
+
+    /** font-style：italic/oblique → true；normal → false；其余 null */
+    fun fontStyleItalic(raw: String): Boolean? {
+        val v = raw.trim().lowercase()
+        if (v == "italic" || v == "oblique") return true
+        if (v == "normal") return false
+        return null
+    }
+
+    /** text-align 子集：left/center/right → 0/1/2；其余（含 justify）不支持 → null */
+    fun textAlignValue(raw: String): Int? {
+        val v = raw.trim().lowercase()
+        if (v == "left") return 0
+        if (v == "center") return 1
+        if (v == "right") return 2
+        return null
+    }
+
+    /** CSS 颜色 → #AARRGGBB（alpha=FF）Int；仅 #rgb/#rrggbb/rgb()/命名色子集；其余返回 null */
+    fun parseColor(raw: String): Int? {
+        val v = raw.trim().lowercase()
+        if (v.isEmpty()) return null
+        if (v.startsWith('#')) {
+            val hex = v.substring(1)
+            return when (hex.length) {
+                3 -> {
+                    val expanded = hex.map { "$it$it" }.joinToString("")
+                    argbOfRgb(expanded.toLongOrNull(16) ?: return null)
+                }
+                6 -> argbOfRgb(hex.toLongOrNull(16) ?: return null)
+                else -> null
+            }
+        }
+        if (v.startsWith("rgb(") && v.endsWith(")")) {
+            val inner = v.removePrefix("rgb(").removeSuffix(")")
+            val tokens = if (inner.contains(',')) inner.split(',') else inner.split(Regex("\\s+"))
+            if (tokens.size != 3) return null
+            val rgb = tokens.map { t ->
+                val tok = t.trim()
+                if (tok.isEmpty()) return null
+                if (tok.endsWith("%")) {
+                    val pct = tok.dropLast(1).toFloatOrNull() ?: return null
+                    (pct / 100f * 255f).toInt().coerceIn(0, 255)
+                } else {
+                    val n = tok.toIntOrNull() ?: return null
+                    n.coerceIn(0, 255)
+                }
+            }
+            return argbOfRgb(((rgb[0].toLong() shl 16) or (rgb[1].toLong() shl 8) or rgb[2].toLong()))
+        }
+        return namedColors[v]?.let { argbOfRgb(it.toLong()) }
+    }
+
+    private fun argbOfRgb(rgb: Long): Int = (0xFF000000L or rgb).toInt()
+
+    /** 解析声明块文本 → CssDecls；未知属性/非法条目静默忽略（逐条，不影响其余） */
+    fun parseDeclarations(text: String): CssDecls {
+        val decls = CssDecls()
+        // margin/padding 垂直分量：分侧累计后归并为 0/非 0 两档（做不了精确排版，设计 §3.2-6）
+        var mTop: Boolean? = null
+        var mBottom: Boolean? = null
+        var pTop: Boolean? = null
+        var pBottom: Boolean? = null
+        for (seg in text.split(';')) {
+            val colon = seg.indexOf(':')
+            if (colon <= 0) continue
+            val prop = seg.substring(0, colon).trim().lowercase()
+            val value = seg.substring(colon + 1).replace(importantRe, "").trim()
+            if (value.isEmpty()) continue
+            when (prop) {
+                "font-size" -> decls.fontSizeRaw = value
+                "line-height" -> decls.lineHeightRaw = value
+                "font-weight" -> decls.weightRaw = value
+                "font-style" -> decls.styleRaw = value
+                "text-align" -> decls.alignRaw = value
+                "color" -> decls.colorRaw = value
+                "margin-top", "margin-bottom", "padding-top", "padding-bottom" -> {
+                    val b = verticalNonZero(value) ?: continue
+                    when (prop) {
+                        "margin-top" -> mTop = b
+                        "margin-bottom" -> mBottom = b
+                        "padding-top" -> pTop = b
+                        "padding-bottom" -> pBottom = b
+                    }
+                }
+                "margin", "padding" -> {
+                    val tokens = value.split(Regex("\\s+"))
+                    if (tokens.size !in 1..4) continue
+                    // 简写垂直分量取位：1 值四边同；2 值 [上下, 左右] → bottom=top=token0；
+                    // 3 值 [上, 左右, 下] 与 4 值 [上, 右, 下, 左] → bottom=token2（审查修复：原 2/3 值取位错误）
+                    val top = tokens[0]
+                    val bottom = when (tokens.size) {
+                        1, 2 -> tokens[0]
+                        3, 4 -> tokens[2]
+                        else -> continue
+                    }
+                    val tb = verticalNonZero(top) ?: continue
+                    val bb = verticalNonZero(bottom) ?: continue
+                    if (prop == "margin") { mTop = tb; mBottom = bb } else { pTop = tb; pBottom = bb }
+                }
+                else -> {} // 其余属性一律静默忽略
+            }
+        }
+        val vertical = listOfNotNull(mTop, mBottom, pTop, pBottom)
+        if (vertical.isNotEmpty()) decls.spacing = vertical.any { it }
+        return decls
+    }
+
+    /** 单值垂直分量是否非 0：0/0px/0em/auto → false；非 0 数值 → true；无法判读（calc 等）→ null */
+    private fun verticalNonZero(token: String): Boolean? {
+        val t = token.trim().lowercase()
+        if (t in setOf("auto", "inherit", "initial", "unset", "revert")) return false
+        val m = lengthRe.find(t) ?: return null
+        val num = m.groupValues[1].toDouble()
+        return num != 0.0
+    }
+
+    /**
+     * 解析 `<style>` 文本 → 规则列表。非法语法静默恢复（未闭合花括号丢弃余下；@ 语句/未知选择器忽略）。
+     * 解析失败返回空表——该书该章回退纯文本（保底可读，设计 §3.2-3）。
+     *
+     * [startOrder] 为跨 `<style>` 块的**全局已累计规则数**：order 必须全书递增，否则"前表表内靠后规则"
+     * 与"后表规则"同优先级时因 order 各自从 0 重计而无法区分先后（CSS 语义：后定义的样式表应赢）。
+     */
+    fun parseStyleSheet(css: String, startOrder: Int = 0): List<CssRule> {
+        val text = css.replace(Regex("(?s)/\\*.*?\\*/"), "")
+        val rules = mutableListOf<CssRule>()
+        var order = startOrder
+        var i = 0
+        while (i < text.length) {
+            val open = text.indexOf('{', i)
+            if (open < 0) break
+            // @charset/@import 等不以 { 结尾的语句段：跳到下一个 ';' 继续
+            val semi = text.indexOf(';', i)
+            if (semi in 0 until open) {
+                i = semi + 1
+                continue
+            }
+            // 匹配闭合 '}'（统计嵌套花括号深度）
+            var depth = 0
+            var close = -1
+            for (j in open until text.length) {
+                if (text[j] == '{') depth++
+                else if (text[j] == '}') {
+                    depth--
+                    if (depth == 0) { close = j; break }
+                }
+            }
+            if (close < 0) break // 未闭合：放弃余下（静默）
+            val selRaw = text.substring(i, open).trim()
+            val declRaw = text.substring(open + 1, close).trim()
+            if (declRaw.isNotEmpty()) {
+                splitSelectorList(selRaw).forEach { part ->
+                    CssSubset.parseSelector(part)?.let { selector ->
+                        rules += CssRule(selector, parseDeclarations(declRaw), order++)
+                    }
+                }
+            }
+            i = close + 1
+        }
+        return rules
+    }
+
+    /** 顶层逗号切分选择器列表（简单子集内无需嵌套，保守忽略括号/引号内容） */
+    private fun splitSelectorList(raw: String): List<String> {
+        val parts = mutableListOf<String>()
+        var depth = 0
+        var quote = '\u0000'
+        val sb = StringBuilder()
+        for (ch in raw) {
+            if (quote != '\u0000') {
+                if (ch == quote) quote = '\u0000'
+                sb.append(ch)
+            } else when (ch) {
+                '\'', '"' -> { quote = ch; sb.append(ch) }
+                '(', '[' -> { depth++; sb.append(ch) }
+                ')', ']' -> { depth = (depth - 1).coerceAtLeast(0); sb.append(ch) }
+                ',' -> if (depth == 0) { parts += sb.toString().trim(); sb.clear() } else sb.append(ch)
+                else -> sb.append(ch)
+            }
+        }
+        if (sb.isNotBlank()) parts += sb.toString().trim()
+        return parts.filter { it.isNotEmpty() }
+    }
+}
+
 /** 目录条目：标题、目标 href、嵌套层级（1 起） */
 internal data class TocEntry(val title: String, val href: String, val level: Int)
 
-/** 章节抽取结果：段落纯文本 + 段落内图片（F2.14，图片挂所属段落索引，不新增 LazyColumn 项） */
+/** 章节抽取结果：段落纯文本 + 段落内图片（F2.14）+ 段落样式提示（F2.15，均挂所属段落索引，不新增 LazyColumn 项） */
 internal data class ExtractedChapter(
     val paragraphs: List<String>,
-    val images: List<ParagraphImage>
+    val images: List<ParagraphImage>,
+    val styles: Map<Int, ParagraphStyleHints> = emptyMap()
 )
 
 /**
@@ -113,7 +448,8 @@ class EpubParser : DocumentParser {
                 title = tocEntry?.title ?: "第 ${index + 1} 章",
                 paragraphs = paragraphs,
                 level = tocEntry?.level ?: 1,
-                images = extracted.images
+                images = extracted.images,
+                styles = extracted.styles
             )
         }
         // F2.14 封面：OPF meta name="cover" 或 manifest properties="cover-image" → isCover 挂首章段落 0
@@ -164,6 +500,78 @@ class EpubParser : DocumentParser {
     /** 章节正文抽取（既有测试用纯文本契约）；图片提取统一走 [extractChapterFrom] */
     internal fun extractParagraphs(bytes: ByteArray): List<String> =
         extractChapterFrom(bytes).paragraphs
+
+    // ---------------- F2.15 段样式帧（继承 + 层叠 + 内联，随 DOM 树压栈） ----------------
+
+    /** 一个开标签的计算样式：继承父级解析后，叠加自身样式表命中规则与内联 style（内联优先级最高） */
+    private class StyleFrame(
+        val tag: String,
+        val parent: StyleFrame?,
+        val fontEm: Float,     // 字号绝对倍率（相对 16sp 基准；em/% 已乘父级）
+        val lineEm: Float,     // 行距绝对倍率（同上）
+        val bold: Boolean?,    // null=未指定（走全局/继承）
+        val italic: Boolean?,
+        val align: Int?,       // 0 左 1 中 2 右
+        val colorArgb: Int?,
+        val spacing: Boolean   // 自身声明的 margin/padding 垂直分量非 0（不继承）
+    )
+
+    /** 归并命中元素（tag/id/class）的样式表规则：id>class>元素、同优先级后定义覆盖先定义 */
+    private fun mergeRuleDecls(
+        tag: String,
+        id: String?,
+        classAttr: String?,
+        rules: List<CssRule>
+    ): CssDecls {
+        val classes = classAttr?.split(' ', '\t')?.filter { it.isNotEmpty() }.orEmpty()
+        val acc = CssDecls()
+        rules.filter { r ->
+            val s = r.selector
+            when {
+                s.idName != null -> id == s.idName
+                s.className != null -> classes.contains(s.className)
+                else -> s.tag != null && s.tag == tag
+            }
+        }.sortedWith(compareBy<CssRule> { it.selector.specificity() }.thenBy { it.order })
+            .forEach { acc.overrideWith(it.declarations) }
+        return acc
+    }
+
+    /** 由声明 + 父级上下文构建计算样式帧（继承：未声明即取父级值） */
+    private fun buildFrame(tag: String, parent: StyleFrame?, decls: CssDecls): StyleFrame {
+        val parentFont = parent?.fontEm ?: 1f
+        val parentLine = parent?.lineEm ?: 1f
+        return StyleFrame(
+            tag = tag,
+            parent = parent,
+            fontEm = decls.fontSizeRaw?.let { CssSubset.lengthToEm(it, parentFont, allowUnitless = false) } ?: parentFont,
+            lineEm = decls.lineHeightRaw?.let { CssSubset.lengthToEm(it, parentLine, allowUnitless = true) } ?: parentLine,
+            bold = decls.weightRaw?.let { CssSubset.weightToBold(it) } ?: parent?.bold,
+            italic = decls.styleRaw?.let { CssSubset.fontStyleItalic(it) } ?: parent?.italic,
+            align = decls.alignRaw?.let { CssSubset.textAlignValue(it) } ?: parent?.align,
+            colorArgb = decls.colorRaw?.let { CssSubset.parseColor(it) } ?: parent?.colorArgb,
+            spacing = decls.spacing ?: false
+        )
+    }
+
+    /** 帧 → 段落样式提示：与全局默认等价的取值省略（避免 styles 表冗余）；全空返回 null */
+    private fun hintsOf(frame: StyleFrame?): ParagraphStyleHints? {
+        if (frame == null) return null
+        val font = if (frame.fontEm != 1f) frame.fontEm else null
+        val line = if (frame.lineEm != 1f) frame.lineEm else null
+        if (font == null && line == null && frame.bold == null && frame.italic == null &&
+            frame.align == null && frame.colorArgb == null && !frame.spacing
+        ) return null
+        return ParagraphStyleHints(
+            fontSizeEm = font,
+            lineHeightEm = line,
+            bold = frame.bold,
+            italic = frame.italic,
+            textAlign = frame.align,
+            colorArgb = frame.colorArgb,
+            paragraphSpacing = frame.spacing
+        )
+    }
 
     // ---------------- zip / container / opf ----------------
 
@@ -405,10 +813,13 @@ class EpubParser : DocumentParser {
     // ---------------- 章节正文与图片抽取 ----------------
 
     /**
-     * 段落级抽取（C4：**段级循环内响应线程中断**）。遇 p/h1~h6/li/br 结束当前段落；丢弃标签与属性；
-     * <img> 提取为 ParagraphImage（规则见文件头 [extractChapterFrom]）；script 忽略；
-     * <head> 内的文本（title/style 等）不属于正文，整体跳过（真机缺陷，2026-08-31）。
-     * 编码防御：优先信任 XML 声明，XmlPullParserException 时按 UTF-8 重解析一次（在 [extractChapterFrom] 处理）。
+     * 段落级抽取（C4：**段级循环内响应线程中断**）。
+     * - 段落边界：遇块级标签（p/h1~h6/li/div/body 等）或 br/hr 结束当前段落（行内元素不打断）；
+     *   纯文本直接置于 body/div 下时，随所在块起止自然成段（与既有 fixture 纯文本契约兼容——块间空白 trim 后丢弃）；
+     * - F2.15：`<style>` 内容收集解析为 CSS 规则（head/body 内均可）；每个非 void 元素开标签压一个样式帧
+     *   （父级继承 + 命中规则 + 内联 style），段落 flush 时以**最近块级祖先帧**产出 [ParagraphStyleHints] 记入 styles[段落索引]；
+     *   `script` 仍忽略；内联样式只影响整段近似（不支持段内 run 级富文本，v1 子集限定）；
+     * - 编码防御：优先信任 XML 声明，XmlPullParserException 时按 UTF-8 重解析一次（在 [extractChapterFrom] 处理）。
      */
     private fun extractWithPull2(
         bytes: ByteArray,
@@ -420,15 +831,46 @@ class EpubParser : DocumentParser {
         parser.setInput(bytes.inputStream(), encoding)
         val paragraphs = mutableListOf<String>()
         val images = mutableListOf<ParagraphImage>()
+        val styles = mutableMapOf<Int, ParagraphStyleHints>()
+        val cssRules = mutableListOf<CssRule>() // 本章已收集的 <style> 规则（head 先行 → body 全量命中）
+        val frames = ArrayDeque<StyleFrame>()   // 开标签样式帧栈
         val sb = StringBuilder()
-        var skipTag: String? = null // script/style 忽略中的标签名
+        var skipTag: String? = null // script 忽略中的标签名
         var skipDepth = 0
-        var headDepth = 0 // <head> 嵌套深度（head 内不入正文，防 <title>Cover</title> 泄漏）
+        var headDepth = 0 // <head> 嵌套深度（head 内除 style 外不入正文，防 <title>Cover</title> 泄漏）
+        var collectingStyle = false
+        val styleBuf = StringBuilder()
 
+        /** 最近的块级（非行内）祖先帧：整段样式归属它 */
+        fun ownerFrame(): StyleFrame? {
+            var i = frames.size - 1
+            while (i >= 0) {
+                val f = frames[i]
+                if (f.tag !in inlineTags) return f
+                i--
+            }
+            return null
+        }
+
+        /** 段落收尾：非空白文本入 paragraphs，并以最近块级祖先帧的样式写 styles[新索引] */
         fun flush() {
             val s = sb.toString().trim()
-            if (s.isNotEmpty()) paragraphs += s
             sb.clear()
+            if (s.isEmpty()) return
+            val idx = paragraphs.size
+            paragraphs += s
+            hintsOf(ownerFrame())?.let { styles[idx] = it }
+        }
+
+        /** 为当前元素开标签压样式帧（样式表命中规则 + 内联 style 覆盖） */
+        fun pushFrameFor(tag: String) {
+            val id = parser.getAttributeValue(null, "id")
+            val classAttr = parser.getAttributeValue(null, "class")
+            val inlineRaw = parser.getAttributeValue(null, "style")
+            val parent = frames.lastOrNull()
+            val decls = mergeRuleDecls(tag, id, classAttr, cssRules)
+            if (inlineRaw != null) decls.overrideWith(CssSubset.parseDeclarations(inlineRaw))
+            frames.addLast(buildFrame(tag, parent, decls))
         }
 
         var event = parser.eventType
@@ -437,18 +879,23 @@ class EpubParser : DocumentParser {
             when (event) {
                 XmlPullParser.START_TAG -> {
                     val tag = parser.name.lowercase()
-                    if (tag == "head") {
-                        headDepth++
-                    } else if (headDepth > 0) {
-                        // head 内其余标签一律忽略（含 style/script，不进 skipTag 逻辑）
-                    } else if (skipDepth > 0) {
-                        if (tag == skipTag) skipDepth++
-                    } else when (tag) {
-                        "script", "style" -> {
+                    when {
+                        tag == "head" -> headDepth++
+                        collectingStyle -> {} // style 文本内的 "<" 不应作为标签；保守忽略
+                        headDepth > 0 -> if (tag == "style") { // head 内 style 需收集（其余标签忽略）
+                            collectingStyle = true
+                            styleBuf.clear()
+                        }
+                        skipDepth > 0 -> if (tag == skipTag) skipDepth++
+                        tag == "script" -> {
                             skipTag = tag
                             skipDepth = 1
                         }
-                        "img" -> {
+                        tag == "style" -> {
+                            collectingStyle = true
+                            styleBuf.clear()
+                        }
+                        tag == "img" -> {
                             val src = parser.getAttributeValue(null, "src")?.trim().orEmpty()
                             if (src.isNotEmpty()) {
                                 val alt = parser.getAttributeValue(null, "alt")?.takeIf { it.isNotBlank() }
@@ -462,29 +909,43 @@ class EpubParser : DocumentParser {
                                 images += ParagraphImage(paragraphIndex = owner, src = canonical, alt = alt)
                             }
                         }
-                        "br", "p", "li", "h1", "h2", "h3", "h4", "h5", "h6" -> flush()
+                        tag == "br" || tag == "hr" -> flush()
+                        tag in voidTags -> {} // meta/link/input 等：无内容无样式帧
+                        else -> {
+                            if (tag !in inlineTags) flush() // 块级开始 = 段落边界
+                            pushFrameFor(tag) // 行内元素同样压帧（继承链连续），但自身不产生段落
+                        }
                     }
                 }
-                XmlPullParser.TEXT -> if (headDepth == 0 && skipDepth == 0) sb.append(parser.text)
+                XmlPullParser.TEXT -> when {
+                    collectingStyle -> styleBuf.append(parser.text)
+                    headDepth == 0 && skipDepth == 0 -> sb.append(parser.text)
+                }
                 XmlPullParser.END_TAG -> {
                     val tag = parser.name.lowercase()
-                    if (tag == "head") {
-                        headDepth--
-                    } else if (headDepth > 0) {
-                        // head 内其余结束标签忽略
-                    } else if (skipDepth > 0) {
-                        if (tag == skipTag) skipDepth--
-                    } else if (tag == "p" || tag == "li" || tag == "h1" || tag == "h2" ||
-                        tag == "h3" || tag == "h4" || tag == "h5" || tag == "h6"
-                    ) {
-                        flush()
+                    when {
+                        tag == "head" -> headDepth--
+                        collectingStyle && tag == "style" -> {
+                            collectingStyle = false
+                            // order 全书递增：后一张 <style> 的同优先级规则应赢（跨表层叠，审查修复）
+                            cssRules += CssSubset.parseStyleSheet(styleBuf.toString(), startOrder = cssRules.size)
+                        }
+                        collectingStyle -> {} // style 文本内不应含标签结束
+                        headDepth > 0 -> {} // head 内其余结束标签忽略（未压帧，勿 pop）
+                        skipDepth > 0 -> if (tag == skipTag) skipDepth--
+                        tag == "style" -> {} // 非 head 的 style 在 collectingStyle 分支已处理，此处防御
+                        tag == "img" || tag in voidTags -> {} // 无帧可 pop（XHTML 显式闭合 img 等）
+                        else -> {
+                            if (tag !in inlineTags) flush() // 块级结束：收尾本块余下文本（归属本块样式）
+                            if (frames.isNotEmpty()) frames.removeLast() // 与 pushFrameFor 对称
+                        }
                     }
                 }
             }
             event = parser.next()
         }
         flush()
-        return ExtractedChapter(paragraphs, images)
+        return ExtractedChapter(paragraphs, images, styles)
     }
 
     /** 剥标签正则降级：仅在 XmlPullParserException/IOException 时触发；head 一并剥除（同正文抽取契约）。无图信息，图片为空。 */

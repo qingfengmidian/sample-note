@@ -466,7 +466,9 @@ fun ReaderContent(
                     listState,
                     // F2.14：epub 章节图片挂段落 item 内渲染；图片文件根 = epub 解压缓存目录（imageRoot）
                     images = chapter?.images.orEmpty(),
-                    imageRoot = state.document?.imageRoot
+                    imageRoot = state.document?.imageRoot,
+                    // F2.15：epub 章节段样式提示（仅 epub 非空；txt/md/xml 空表零影响）
+                    styles = chapter?.styles.orEmpty()
                 )
             }
         }
