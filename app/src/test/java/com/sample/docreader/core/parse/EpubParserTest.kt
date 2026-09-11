@@ -95,13 +95,42 @@ class EpubParserTest {
         assertTrue(doc.chapters[0].paragraphs.any { it.contains("这是 GBK 编码的章节内容。") })
     }
 
-    /** TC-UT-05：无导航文件 → 标题退化"第 N 章"，正文仍可解析 */
+    /** TC-UT-05：无导航文件 epub → F2.16 起**不再生成"第 N 章"**：章节 title 全 null、Document.toc 为空，正文仍可解析 */
     @Test
     fun tcUt05_noNav() = runBlocking {
         val doc = parser.parseBytes(Fixtures.bytes("no_nav.epub"), "no_nav.epub")
-        assertEquals(listOf("第 1 章", "第 2 章", "第 3 章"), doc.chapters.map { it.title })
+        assertTrue("无目录书的章节标题应为 null：${doc.chapters.map { it.title }}", doc.chapters.all { it.title == null })
+        assertTrue("无目录书 Document.toc 应为空", doc.toc.isEmpty())
         assertTrue(doc.chapters.all { it.paragraphs.isNotEmpty() })
         assertTrue(doc.chapters[0].paragraphs.contains("第 1 章第一段。"))
+    }
+
+    /** TC-UT-14（F2.16）：章节锚点映射——段落元素 id → 该段落；容器元素 id → 其内首个段落；段中 `<a name>` → 所在段落；无锚点章为空表 */
+    @Test
+    fun tcUt14_chapterAnchors() = runBlocking {
+        val bytes = Fixtures.bytes("anchor_toc.epub")
+        val ch1 = parser.chapterAnchors(bytes, "OEBPS/Text/p1.xhtml")
+        assertEquals("段落元素 id 应映射到该段落", 1, ch1["sec1"])
+        assertEquals("容器 div id 应映射到其内首个段落", 3, ch1["sec2"])
+        assertTrue("无 id 的章节锚点表应为空", parser.chapterAnchors(bytes, "OEBPS/Text/p2.xhtml").isEmpty())
+        // 边界：<a name> 位于段落文字中段（段落尚未 flush）→ 应映射到**所在段落**（索引 1），而非上一段
+        val ch4 = parser.chapterAnchors(bytes, "OEBPS/Text/p4.xhtml")
+        assertEquals("段中 <a name> 应映射到其所在段落", 1, ch4["mid"])
+    }
+
+    /** TC-UT-15（F2.16）：epub 目录 = NCX 原样（标题/层级/条目数），每条换算为 (chapterIndex, anchorParagraph) */
+    @Test
+    fun tcUt15_epubTocMapping() = runBlocking {
+        val doc = parser.parseBytes(Fixtures.bytes("anchor_toc.epub"), "anchor_toc.epub")
+        // 目录条目 = NCX 原样：未编入 NCX 的 p3 不产生条目
+        assertEquals(listOf("封面页", "第一节", "第二节", "未命中锚点", "中间锚点"), doc.toc.map { it.title })
+        assertEquals("层级 = navPoint 嵌套（第二节嵌套于第一节）", listOf(1, 1, 2, 1, 1), doc.toc.map { it.level })
+        assertEquals("无 fragment→章首；多条目同指一章均保留", listOf(0, 1, 1, 2, 4), doc.toc.map { it.chapterIndex })
+        assertEquals(
+            "无 fragment/未命中 fragment→章首(0)；段落锚点→该段落(1)；容器 id→其内首个段落(3)；段中 <a name>→所在段落(1)",
+            listOf(0, 1, 3, 0, 1), doc.toc.map { it.anchorParagraph })
+        // 章节标题取匹配到的 toc 条目；未编入 NCX 的章节 title 为 null（无"第 N 章"兜底）
+        assertEquals(listOf("封面页", "第一节", "未命中锚点", null, "中间锚点"), doc.chapters.map { it.title })
     }
 
     /** TC-UT-06：broken.epub 缺 OPF → ParseException.MissingOpf */

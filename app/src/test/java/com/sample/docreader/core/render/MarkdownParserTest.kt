@@ -175,6 +175,21 @@ class MarkdownParserTest {
         )
     }
 
+    /** TC-UT-16（F2.13 REV8）：目录标题剥除行内链接标记——保留链接文字、去除 URL 与地址 */
+    @Test
+    fun scanHeadings_stripsInlineLink() {
+        val toc = MarkdownParser.scanHeadings(
+            listOf("## The development of Social Doctrine from [Leo XIII](https://example.com/leo) to the present")
+        )
+        assertEquals(
+            listOf(com.sample.docreader.core.model.TocEntry(2, "The development of Social Doctrine from Leo XIII to the present", 0)),
+            toc
+        )
+        // 链接文字内含强调标记时一并剥离
+        val nested = MarkdownParser.scanHeadings(listOf("### 参见 [**加粗链接**](https://example.com/x) 与 `代码`"))
+        assertEquals(listOf(com.sample.docreader.core.model.TocEntry(3, "参见 加粗链接 与 代码", 0)), nested)
+    }
+
     /** F2.13（S10）：无标题/纯正文文档 toc 为空；scanHeadings 与 parse 的标题语法完全同源（封闭 ATX 均降级为段落） */
     @Test
     fun scanHeadings_emptyToc_and_closedAtxDegradesInParseToo() {

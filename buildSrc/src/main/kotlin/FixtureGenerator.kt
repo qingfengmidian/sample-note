@@ -214,10 +214,71 @@ object FixtureGenerator {
             opf = null, // container.xml 指向不存在的 OPF
             files = mapOf("ch1.xhtml" to xhtml("孤儿章", "<p>内容。</p>")))
 
-        // 无导航文件（标题退化为"第 N 章"）
+        // 无导航文件（F2.16/M12：无 NCX/nav → Document.toc 为空、章节 title 全 null，不再退化"第 N 章"）
         epub(dir, "no_nav.epub",
             opf(chapters, ncx = false, nav = false),
             chapters.toMap())
+
+        // M12 新增（F2.16/TC-UT-05 改写、TC-UT-14/15）：epub 原生目录 + 锚点映射夹具。
+        // NCX 原样条目：嵌套层级（第二节嵌套于第一节）+ 带 fragment 的 content src（命中 sec1/sec2/mid、未命中 nope）；
+        // p3.xhtml 不编入 NCX（验证章节 title 为 null、无生成式兜底条目）。
+        // p1 段落索引契约（测试断言据此）：0 开头段、1 锚点段(sec1)、2 后续段、3 容器首段(sec2)、4 容器次段。
+        // p4 边界：`<a name="mid">` 位于段落文字中段（段落尚未 flush）→ 应映射到所在段落索引 1，而非上一段。
+        epub(dir, "anchor_toc.epub",
+            opf = """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
+                |<metadata><dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/" id="id">fixture-anchor</dc:identifier>
+                |<dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">anchor</dc:title>
+                |<dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">zh</dc:language></metadata>
+                |<manifest>
+                |<item id="p0" href="Text/p0.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="p1" href="Text/p1.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="p2" href="Text/p2.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="p3" href="Text/p3.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="p4" href="Text/p4.xhtml" media-type="application/xhtml+xml"/>
+                |<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+                |</manifest>
+                |<spine toc="ncx">
+                |<itemref idref="p0"/><itemref idref="p1"/><itemref idref="p2"/><itemref idref="p3"/><itemref idref="p4"/>
+                |</spine>
+                |</package>
+                |""".trimMargin(),
+            files = linkedMapOf(
+                "Text/p0.xhtml" to """<?xml version="1.0" encoding="UTF-8"?>
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面页</title></head>
+                    |<body><p>封面页段落。</p></body></html>
+                    |""".trimMargin(),
+                "Text/p1.xhtml" to """<?xml version="1.0" encoding="UTF-8"?>
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一节</title></head>
+                    |<body><p>第一节开头段。</p><p id="sec1">第一节锚点段。</p><p>第一节后续段。</p><div id="sec2"><p>第二节容器内首段。</p><p>第二节容器内次段。</p></div></body></html>
+                    |""".trimMargin(),
+                "Text/p2.xhtml" to """<?xml version="1.0" encoding="UTF-8"?>
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>未命中锚点</title></head>
+                    |<body><p>未命中锚点章第一段。</p><p>未命中锚点章第二段。</p></body></html>
+                    |""".trimMargin(),
+                "Text/p3.xhtml" to """<?xml version="1.0" encoding="UTF-8"?>
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>未编入目录</title></head>
+                    |<body><p>未编入目录的章节段落。</p></body></html>
+                    |""".trimMargin(),
+                "Text/p4.xhtml" to """<?xml version="1.0" encoding="UTF-8"?>
+                    |<html xmlns="http://www.w3.org/1999/xhtml"><head><title>中间锚点</title></head>
+                    |<body><p>中段锚点章第一段。</p><p>第二段前文<a name="mid">锚点后文</a>。</p></body></html>
+                    |""".trimMargin(),
+                "toc.ncx" to """
+                    |<?xml version="1.0" encoding="UTF-8"?>
+                    |<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+                    |<navMap>
+                    |<navPoint id="np0"><navLabel><text>封面页</text></navLabel><content src="Text/p0.xhtml"/></navPoint>
+                    |<navPoint id="np1"><navLabel><text>第一节</text></navLabel><content src="Text/p1.xhtml#sec1"/>
+                    |<navPoint id="np2"><navLabel><text>第二节</text></navLabel><content src="Text/p1.xhtml#sec2"/></navPoint>
+                    |</navPoint>
+                    |<navPoint id="np3"><navLabel><text>未命中锚点</text></navLabel><content src="Text/p2.xhtml#nope"/></navPoint>
+                    |<navPoint id="np4"><navLabel><text>中间锚点</text></navLabel><content src="Text/p4.xhtml#mid"/></navPoint>
+                    |</navMap>
+                    |</ncx>
+                    |""".trimMargin()
+            ))
 
         // epub3 nav.xhtml 嵌套 <ol>（olDepth>1 → chapter.level>1）
         epub(dir, "nested_nav.epub",
@@ -642,7 +703,7 @@ object FixtureGenerator {
             "nested_toc.epub", "mixed_encoding.epub", "bad_decl.epub", "broken.epub", "no_nav.epub",
             "malformed.epub", "nested_nav.epub", "bad_spine.epub",
             "sample_images.epub", "sample_cover.epub", "broken_image.epub",
-            "styled.epub", "bad_css.epub")
+            "styled.epub", "bad_css.epub", "anchor_toc.epub")
             .forEach { name ->
                 val e = entries(name)
                 check(e["mimetype"]?.toString(Charsets.US_ASCII) == "application/epub+zip",
@@ -753,6 +814,34 @@ object FixtureGenerator {
             "bad_css.epub 第 1 章应含非法语法（???/@media 段）与合法子集规则")
         check(badCssCh1.contains("正文第一段可读。"),
             "bad_css.epub 第 1 章正文应完整")
+
+        // M12 新增（F2.16/TC-UT-14/15）：anchor_toc.epub 结构自检——navPoint 数量/嵌套层级/fragment/锚点 id/未编入章节
+        val anchorEntries = entries("anchor_toc.epub")
+        val anchorNcx = anchorEntries["OEBPS/toc.ncx"]?.toString(Charsets.UTF_8) ?: ""
+        check(Regex("<navPoint\\b").findAll(anchorNcx).count() == 5,
+            "anchor_toc.epub 的 NCX 应含 5 条 navPoint")
+        check(anchorNcx.contains("""src="Text/p0.xhtml"""") &&
+            anchorNcx.contains("""src="Text/p1.xhtml#sec1"""") &&
+            anchorNcx.contains("""src="Text/p1.xhtml#sec2"""") &&
+            anchorNcx.contains("""src="Text/p2.xhtml#nope"""") &&
+            anchorNcx.contains("""src="Text/p4.xhtml#mid""""),
+            "anchor_toc.epub 的 NCX href 应原样保留 fragment（p0 无 fragment、p1 两条、p2 未命中、p4 段中）")
+        check(!anchorNcx.contains("p3.xhtml"),
+            "anchor_toc.epub 的 p3.xhtml 不应编入 NCX")
+        val anchorP1 = anchorEntries["OEBPS/Text/p1.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(anchorP1.contains("""id="sec1"""") && anchorP1.contains("""id="sec2""""),
+            "anchor_toc.epub 的 p1.xhtml 应含 sec1/sec2 锚点 id")
+        val anchorP4 = anchorEntries["OEBPS/Text/p4.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(anchorP4.contains("""<a name="mid">锚点后文</a>"""),
+            "anchor_toc.epub 的 p4.xhtml 应含段中 <a name=\"mid\"> 锚点")
+        val iNp1 = anchorNcx.indexOf("""<navPoint id="np1">""")
+        val iNp2 = anchorNcx.indexOf("""<navPoint id="np2">""")
+        val iNp3 = anchorNcx.indexOf("""<navPoint id="np3">""")
+        val iNp4 = anchorNcx.indexOf("""<navPoint id="np4">""")
+        check(iNp1 in 0 until iNp2 && iNp2 < iNp3 && iNp3 < iNp4,
+            "anchor_toc.epub 的 NCX 应先序为 np1 → 嵌套 np2 → np3 → np4")
+        check(Regex("</navPoint>").findAll(anchorNcx.substring(iNp2, iNp3)).count() == 2,
+            "anchor_toc.epub 的第二节应嵌套于第一节内（np2 与 np1 依次闭合，层级 1/1/2/1）")
     }
 }
 

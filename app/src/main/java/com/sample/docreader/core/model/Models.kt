@@ -53,14 +53,20 @@ data class ParagraphStyleHints(
 )
 
 /**
- * 目录锚点（F2.13）：md 解析时把标题提取为目录项，锚定单章段落流中的段落索引。
- * 段落索引是渲染/进度/toc 的统一坐标（源码 LazyColumn item 索引 == 段落索引），
- * 预览视图跳转经 MarkdownBlock↔段落索引映射换算（见 MarkdownParser.startParagraphIndex）。
+ * 目录条目（F2.13 md / F2.16 epub）：
+ * - md：把标题提取为目录项，锚定单章段落流中的段落索引。段落索引是渲染/进度/toc 的统一坐标
+ *   （源码 LazyColumn item 索引 == 段落索引），预览视图跳转经 MarkdownBlock↔段落索引映射换算
+ *   （见 MarkdownParser.startParagraphIndex）。
+ * - epub（F2.16，M12）：条目 = 文件自带目录（nav/NCX）原样；[chapterIndex] 为目标章（spine 序），
+ *   [anchorParagraph] 为锚点段落（href 的 #fragment 经章节锚点表换算；无 fragment/未命中/章首为 0），
+ *   [paragraphIndex] 恒 0（md 单章坐标语义保留）。
  */
 data class TocEntry(
     val level: Int,            // 1~6（对应 ATX H1~H6）
-    val title: String,         // 标题纯文本（去除 # 前缀与行内标记符号，评审 S10）
-    val paragraphIndex: Int    // 标题所在段落索引（源码视图滚动目标；预览经块↔段落映射）
+    val title: String,         // 标题纯文本（去除 # 前缀与行内标记符号，评审 S10；F2.13 REV8：链接保留文字）
+    val paragraphIndex: Int,   // md：标题所在段落索引（源码视图滚动目标；预览经块↔段落映射）
+    val chapterIndex: Int = 0, // epub（F2.16）：目标章索引（spine 序）；md 恒 0
+    val anchorParagraph: Int? = null // epub（F2.16）：锚点段落；md 为 null（用 paragraphIndex 语义）
 )
 
 enum class WrapMode { WRAP, NO_WRAP }

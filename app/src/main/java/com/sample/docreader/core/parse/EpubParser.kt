@@ -471,6 +471,13 @@ class EpubParser : DocumentParser {
     }
 
     /**
+     * 章节锚点表（F2.16，M12 待实现，本批次仅声明接口接缝）：元素 id → 段落索引。
+     * 段落元素 id → 该段落；容器元素 id → 其内首个段落（容器内无段落时取最近前段落）。
+     * `<a name="x">` 同样视为锚点；正文解析降级路径（stripTagsFallback2）无结构信息，返回空表。
+     */
+    internal fun chapterAnchors(bytes: ByteArray, chapterPath: String): Map<String, Int> = emptyMap()
+
+    /**
      * 章节正文/图片抽取统一出口（供 zip 条目与缓存目录两条路径复用）。
      * 图片规则（设计 §3.2-3，评审 S8/S6）：
      *  - 行内 `<img>`（段内已有文字）归当前未 flush 段落；
