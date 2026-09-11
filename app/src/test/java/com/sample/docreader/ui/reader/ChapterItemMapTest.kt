@@ -56,7 +56,7 @@ class ChapterItemMapTest {
         val map = ChapterItemMap(chapters(3, 0, 2))
         assertEquals(0, map.firstItemOfChapter(0))
         assertEquals(3, map.firstItemOfChapter(1))
-        assertEquals(4, map.firstItemOfChapter(9))
+        assertEquals("章索引越界 clamp 到末章的起始项", 3, map.firstItemOfChapter(9))
 
         val empty = ChapterItemMap(emptyList())
         assertEquals(0, empty.totalItems)

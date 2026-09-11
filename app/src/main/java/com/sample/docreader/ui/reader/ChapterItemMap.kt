@@ -19,19 +19,43 @@ data class ChapterPosition(val chapter: Int, val paragraph: Int)
 class ChapterItemMap(private val chapters: List<Chapter>) {
 
     /** 各章起始全局 item 索引（长度 = 章数；第 i 项 = 前 i 章段落数之和） */
-    val offsets: IntArray = TODO("M12b 实现")
+    val offsets: IntArray = IntArray(chapters.size).also { arr ->
+        var acc = 0
+        for (i in chapters.indices) {
+            arr[i] = acc
+            acc += chapters[i].paragraphs.size
+        }
+    }
 
     /** 全书 item 总数 */
-    val totalItems: Int = TODO("M12b 实现")
+    val totalItems: Int = chapters.sumOf { it.paragraphs.size }
 
     val chapterCount: Int = chapters.size
 
     /** 第 [chapter] 章的起始全局 item（clamp 到 [0, chapterCount-1]；空书返回 0） */
-    fun firstItemOfChapter(chapter: Int): Int = TODO("M12b 实现")
+    fun firstItemOfChapter(chapter: Int): Int {
+        if (chapters.isEmpty()) return 0
+        return offsets[chapter.coerceIn(0, chapters.size - 1)]
+    }
 
     /** 全局 item → (章, 段)；clamp：负数取首项、越界取末项；空书返回 (0, 0) */
-    fun locate(itemIndex: Int): ChapterPosition = TODO("M12b 实现")
+    fun locate(itemIndex: Int): ChapterPosition {
+        if (chapters.isEmpty() || totalItems == 0) return ChapterPosition(0, 0)
+        val clamped = itemIndex.coerceIn(0, totalItems - 1)
+        // 取最后一个起始偏移 ≤ clamped 的章：空章宽度 0（偏移相等）会被后续非空章覆盖，
+        // 从而全局索引永不落在空章上；尾部空章因 clamped ≤ totalItems-1 亦不可达。
+        var chapter = 0
+        for (i in chapters.indices) {
+            if (offsets[i] <= clamped) chapter = i else break
+        }
+        return ChapterPosition(chapter, clamped - offsets[chapter])
+    }
 
     /** (章, 段) → 全局 item；越界 clamp；段落数 0 的章返回该章起始 item */
-    fun globalItem(chapter: Int, paragraph: Int): Int = TODO("M12b 实现")
+    fun globalItem(chapter: Int, paragraph: Int): Int {
+        if (chapters.isEmpty()) return 0
+        val c = chapter.coerceIn(0, chapters.size - 1)
+        val lastIndex = (chapters[c].paragraphs.size - 1).coerceAtLeast(0)
+        return offsets[c] + paragraph.coerceIn(0, lastIndex)
+    }
 }

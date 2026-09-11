@@ -47,7 +47,10 @@ data class ReaderUiState(
     val editable: Boolean = true,          // 文件 ≤2MB 可编辑，超出只读（TC-F3-09，设计§8；真机验证 1.35MB 可编辑，5MB 触发 ANR）
     val hasMore: Boolean = false,          // txt 分块加载：还有未加载段落（M8b，F4.2）
     val loadingMore: Boolean = false,      // txt 分块加载：正在追加下一块（防重入）
-    val encodingOverride: String? = null   // G1（F2.6）：txt 手动编码覆盖的 charset 名；null = 自动探测（会话内有效，不持久化）
+    val encodingOverride: String? = null,  // G1（F2.6）：txt 手动编码覆盖的 charset 名；null = 自动探测（会话内有效，不持久化）
+    val materializedChapterCount: Int = 0, // F4.7（M12b）：已物化进 item 列表的章数（初始 1；恢复时 = 恢复章 + 1）
+    val totalItems: Int = 0,               // F4.7（M12b）：全书 item 总数（= ChapterItemMap.totalItems，解析全量故精确）
+    val restoreItem: Int? = null           // F4.7（M12b）：一次性全局 item 滚动目标（M12c 消费；与 restoreParagraph 并存）
 )
 
 /**
@@ -67,6 +70,9 @@ class ReaderViewModel(
 
     private var currentUri: String = ""
     private var currentParagraph: Int = 0
+
+    /** F4.7（M12b）：全局 item ↔ (章, 段) 前缀和映射；load 时按当前 Document 重建，txt 追加后同步刷新 */
+    private var itemMap: ChapterItemMap? = null
 
     /** G1（F2.6）：txt 手动编码覆盖；null = 自动探测。仅会话内有效，不写 DataStore */
     private var encodingOverride: Charset? = null
@@ -125,13 +131,18 @@ class ReaderViewModel(
                 val maxParagraph =
                     (document.chapters.getOrNull(chapterIndex)?.paragraphs?.lastIndex ?: 0).coerceAtLeast(0)
                 currentParagraph = restored?.paragraph?.coerceIn(0, maxParagraph) ?: 0
+                val map = ChapterItemMap(document.chapters)
+                itemMap = map
                 _uiState.update {
                     it.copy(
                         loading = false,
                         document = document,
                         chapterIndex = chapterIndex,
                         restoreParagraph = currentParagraph,
-                        editable = editable
+                        editable = editable,
+                        materializedChapterCount = minOf(chapterIndex + 1, document.chapters.size),
+                        totalItems = map.totalItems,
+                        restoreItem = map.globalItem(chapterIndex, currentParagraph)
                     )
                 }
             } catch (e: ParseException) {
@@ -233,6 +244,7 @@ class ReaderViewModel(
         val document = Document(uri, name, DocFormat.TXT, listOf(Chapter(null, paragraphs)))
         val maxParagraph = (paragraphs.size - 1).coerceAtLeast(0)
         currentParagraph = target.coerceIn(0, maxParagraph)
+        itemMap = ChapterItemMap(document.chapters)
         _uiState.update {
             it.copy(
                 loading = false,
@@ -241,7 +253,10 @@ class ReaderViewModel(
                 restoreParagraph = currentParagraph,
                 editable = editable,
                 hasMore = loader.hasMore,
-                loadingMore = false
+                loadingMore = false,
+                materializedChapterCount = 1,
+                totalItems = paragraphs.size,
+                restoreItem = currentParagraph
             )
         }
     }
@@ -285,6 +300,46 @@ class ReaderViewModel(
     /** UI 完成一次 restoreParagraph 滚动后调用，清除一次性目标 */
     fun consumeRestoreParagraph() = _uiState.update { it.copy(restoreParagraph = null) }
 
+    // ---- F4.7（M12b）：跨章连续滚动的 VM 层坐标系与章级窗口（加法式，既有 API 行为不变）----
+
+    /**
+     * 连续滚动触底追加下一章（章级渐进物化）。已到末章时为空操作（末章停止）。
+     * 只增不减：已读章不回收（决策日志 D-2026-09-11-03，索引稳定优先）。
+     */
+    fun appendNextChapter() {
+        val total = _uiState.value.document?.chapters?.size ?: return
+        _uiState.update {
+            it.copy(materializedChapterCount = (it.materializedChapterCount + 1).coerceAtMost(total))
+        }
+    }
+
+    /**
+     * 把物化窗口扩到至少 [chapter] + 1 章（进度条拖动/目录跳转前置，F4.7/F4.8）。
+     * 越界 [chapter] 不报错：目标 clamp 到 [0, 章数]，且不缩小当前窗口。
+     */
+    fun ensureMaterialized(chapter: Int) {
+        val total = _uiState.value.document?.chapters?.size ?: return
+        _uiState.update {
+            val target = (chapter + 1).coerceIn(0, total)
+            it.copy(materializedChapterCount = maxOf(it.materializedChapterCount, target))
+        }
+    }
+
+    /**
+     * UI 上报首个可见全局 item → 经 [ChapterItemMap.locate] 换算为 (章, 段)，
+     * 当前章跟随滚动位置，并走既有 500ms 防抖落库（进度坐标仍为 `(chapter, paragraph)`，零迁移）。
+     */
+    fun onFirstVisibleItemChanged(itemIndex: Int) {
+        val map = itemMap ?: return
+        val pos = map.locate(itemIndex)
+        currentParagraph = pos.paragraph
+        _uiState.update { it.copy(chapterIndex = pos.chapter) }
+        scheduleProgressPersist(pos.chapter, pos.paragraph)
+    }
+
+    /** UI 完成一次 restoreItem 滚动后调用，清除一次性目标（与 consumeRestoreParagraph 同型） */
+    fun consumeRestoreItem() = _uiState.update { it.copy(restoreItem = null) }
+
     /**
      * txt 分块加载（M8b，F4.2）：滚动接近底部（余量 [com.sample.docreader.core.parse.PagedTextLoader.PREFETCH_MARGIN] 段）
      * 且 hasMore && !loadingMore 时由 UI 触发，追加下一块到首章段落末尾；非分块路径（md/xml/epub）调用为空操作。
@@ -308,10 +363,14 @@ class ReaderViewModel(
                     // 只 append：段落索引稳定（itemsIndexed key 为索引，重排会炸 UI）
                     val chapters = listOf(first.copy(paragraphs = first.paragraphs + chunk)) +
                         doc.chapters.drop(1)
+                    // F4.7（M12b）：txt 单章追加后同步刷新全局 item 总数（只 append，索引稳定契约不变）
+                    val map = ChapterItemMap(chapters)
+                    itemMap = map
                     st.copy(
                         document = doc.copy(chapters = chapters),
                         hasMore = loader.hasMore,
-                        loadingMore = false
+                        loadingMore = false,
+                        totalItems = map.totalItems
                     )
                 }
             } catch (e: CancellationException) {
