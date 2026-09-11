@@ -155,16 +155,24 @@ object MarkdownParser {
         return toc
     }
 
-    /** 行内标记剥离：把 parseInline 的结果段拼接为纯文本标题（加粗/斜体/行内代码取内部文字） */
-    private fun plainTitle(content: String): String = buildString {
-        for (segment in parseInline(content)) {
-            when (segment) {
-                is MdInline.Text -> append(segment.text)
-                is MdInline.Bold -> append(segment.text)
-                is MdInline.Italic -> append(segment.text)
-                is MdInline.Code -> append(segment.text)
+    /**
+     * 行内标记剥离：把 parseInline 的结果段拼接为纯文本标题（加粗/斜体/行内代码取内部文字）。
+     * F2.13 REV8：链接 `[文字](url)` 先替换为其文字（链接文字内的行内标记随后续一并剥离），
+     * 多余空白归一为单空格；**预览视图 [parseInline] 语义不变**（对链接仍按原文输出）。
+     */
+    private fun plainTitle(content: String): String {
+        val noLinks = LINK.replace(content) { it.groupValues[1] }
+        val text = buildString {
+            for (segment in parseInline(noLinks)) {
+                when (segment) {
+                    is MdInline.Text -> append(segment.text)
+                    is MdInline.Bold -> append(segment.text)
+                    is MdInline.Italic -> append(segment.text)
+                    is MdInline.Code -> append(segment.text)
+                }
             }
         }
+        return text.replace(WHITESPACE, " ").trim()
     }
 
     /** 行内解析：`**加粗**` → Bold，`*斜体*` → Italic，`` `code` `` → Code；其余为 Text */
@@ -187,4 +195,6 @@ object MarkdownParser {
     }
 
     private val INLINE = Regex("""(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)""")
+    private val LINK = Regex("""\[([^\]]*)\]\([^)]*\)""") // F2.13 REV8：目录标题剥链接（仅目录路径，parseInline 不动）
+    private val WHITESPACE = Regex("\\s+")
 }

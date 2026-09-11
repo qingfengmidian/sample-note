@@ -8,6 +8,7 @@ import com.sample.docreader.core.model.Document
 import com.sample.docreader.core.model.ParagraphImage
 import com.sample.docreader.core.model.ParagraphStyleHints
 import com.sample.docreader.core.model.ParseException
+import com.sample.docreader.core.model.TocEntry as ModelTocEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
@@ -354,17 +355,22 @@ internal object CssSubset {
 /** 目录条目：标题、目标 href、嵌套层级（1 起） */
 internal data class TocEntry(val title: String, val href: String, val level: Int)
 
-/** 章节抽取结果：段落纯文本 + 段落内图片（F2.14）+ 段落样式提示（F2.15，均挂所属段落索引，不新增 LazyColumn 项） */
+/**
+ * 章节抽取结果：段落纯文本 + 段落内图片（F2.14）+ 段落样式提示（F2.15，均挂所属段落索引，不新增 LazyColumn 项）
+ * + 章节锚点表（F2.16：元素 id / `<a name>` → 段落索引；降级路径为空表）。
+ */
 internal data class ExtractedChapter(
     val paragraphs: List<String>,
     val images: List<ParagraphImage>,
-    val styles: Map<Int, ParagraphStyleHints> = emptyMap()
+    val styles: Map<Int, ParagraphStyleHints> = emptyMap(),
+    val anchors: Map<String, Int> = emptyMap()
 )
 
 /**
  * EPUB 解析器（《软件设计文档》§3.2/§5.1）：
  * container.xml 定位 OPF → manifest + spine 得章节顺序 → 逐章 XmlPullParser 抽取正文与图片；
- * 标题优先 epub3 nav.xhtml，回退 NCX navLabel，再退化为"第 N 章"。
+ * F2.16（M12）：目录 = 文件自带 nav.xhtml（优先）/ NCX 原样产出到 Document.toc（含章坐标 + 锚点段落），
+ * 章节标题取匹配条目、无匹配为 null（取消「第 N 章」兜底）。
  *
  * M11b（F2.14）：解析数据源抽象为 [EpubFiles]——生产 epub 打开先经 EpubCache 解压到私有缓存，
  * 由 [parseFromDir] 从缓存目录读取（正文不整书驻留内存，评审 C1）；整字节路径（单测/缓存回退）
@@ -416,17 +422,20 @@ class EpubParser : DocumentParser {
         }
         // 3. 目录：优先 nav.xhtml，回退 NCX
         val toc = parseToc(files, opf, base)
-        val titleByPath = LinkedHashMap<String, TocEntry>() // 先出现的条目优先
+        val titleByPath = LinkedHashMap<String, TocEntry>() // 先出现的条目优先（仅用于章节标题匹配）
         // calibre 等生成器常在 toc href 后带锚点（如 "text/ch1.html#sec1"，Flatland.epub 实测），
-        // 剥离 #fragment 后才能与 spine/manifest 的 href 匹配，否则章节标题全部退化"第 N 章"（真机缺陷，2026-08-31）
+        // 剥离 #fragment 后才能与 spine/manifest 的 href 匹配（真机缺陷，2026-08-31）
         for (t in toc) titleByPath.putIfAbsent(resolvePath(base, t.href.substringBefore('#')), t)
 
         val chapters = ArrayList<Chapter>(opf.spine.size)
+        val anchorsByChapter = ArrayList<Map<String, Int>>(opf.spine.size)
+        val chapterIndexByPath = HashMap<String, Int>() // F2.16：spine 路径 → 章索引（先出现者优先）
         opf.spine.forEachIndexed { index, idref ->
             checkInterrupted() // 逐章循环内响应取消（C4 与逐章粒度并存）
             val href = opf.manifest[idref]
                 ?: throw ParseException.MalformedContent(IllegalStateException("spine 引用未知 id：$idref"))
             val path = resolvePath(base, href)
+            chapterIndexByPath.putIfAbsent(path, index)
             val chapterBytes = files.read(path)
                 ?: throw ParseException.MalformedContent(IllegalStateException("章节文件缺失：$path"))
             val extracted = try {
@@ -443,9 +452,10 @@ class EpubParser : DocumentParser {
             } else {
                 extracted.paragraphs
             }
+            anchorsByChapter += extracted.anchors
             val tocEntry = titleByPath[path]
             chapters += Chapter(
-                title = tocEntry?.title ?: "第 ${index + 1} 章",
+                title = tocEntry?.title, // F2.16：取消「第 N 章」兜底，无匹配即 null
                 paragraphs = paragraphs,
                 level = tocEntry?.level ?: 1,
                 images = extracted.images,
@@ -459,7 +469,26 @@ class EpubParser : DocumentParser {
                 chapters[0] = head.copy(images = listOf(cover) + head.images)
             }
         }
-        return Document(uri, name, DocFormat.EPUB, chapters, imageRoot = imageRoot)
+        // F2.16：Document.toc = 文件自带目录原样（标题/层级/条目数），逐条经原值 href 的 #fragment 换算锚点段落。
+        // 多条目同指一章全部保留；fragment 命中锚点表 → 该段落，无 fragment/未命中/映射缺失 → 章首 0（仍保证可达）。
+        val docToc = toc.map { t ->
+            val path = resolvePath(base, t.href.substringBefore('#'))
+            val chapterIndex = chapterIndexByPath[path] ?: 0
+            val fragment = t.href.substringAfter('#', "")
+            val anchorParagraph = if (fragment.isEmpty()) {
+                0
+            } else {
+                anchorsByChapter.getOrNull(chapterIndex)?.get(fragment) ?: 0
+            }
+            ModelTocEntry(
+                level = t.level,
+                title = t.title,
+                paragraphIndex = 0,
+                chapterIndex = chapterIndex,
+                anchorParagraph = anchorParagraph
+            )
+        }
+        return Document(uri, name, DocFormat.EPUB, chapters, toc = docToc, imageRoot = imageRoot)
     }
 
     /** 目录条目（含嵌套层级），便于单测验证嵌套 toc */
@@ -471,11 +500,15 @@ class EpubParser : DocumentParser {
     }
 
     /**
-     * 章节锚点表（F2.16，M12 待实现，本批次仅声明接口接缝）：元素 id → 段落索引。
+     * 章节锚点表（F2.16）：元素 id → 段落索引。
      * 段落元素 id → 该段落；容器元素 id → 其内首个段落（容器内无段落时取最近前段落）。
      * `<a name="x">` 同样视为锚点；正文解析降级路径（stripTagsFallback2）无结构信息，返回空表。
+     * [bytes] 为整书字节，[chapterPath] 为 zip 内章节路径（如 "OEBPS/Text/p1.xhtml"）；条目缺失返回空表。
      */
-    internal fun chapterAnchors(bytes: ByteArray, chapterPath: String): Map<String, Int> = emptyMap()
+    internal fun chapterAnchors(bytes: ByteArray, chapterPath: String): Map<String, Int> {
+        val chapterBytes = readZip(bytes)[chapterPath] ?: return emptyMap()
+        return extractChapterFrom(chapterBytes, chapterDir = chapterPath.substringBeforeLast('/', "")).anchors
+    }
 
     /**
      * 章节正文/图片抽取统一出口（供 zip 条目与缓存目录两条路径复用）。
@@ -520,7 +553,9 @@ class EpubParser : DocumentParser {
         val italic: Boolean?,
         val align: Int?,       // 0 左 1 中 2 右
         val colorArgb: Int?,
-        val spacing: Boolean   // 自身声明的 margin/padding 垂直分量非 0（不继承）
+        val spacing: Boolean,  // 自身声明的 margin/padding 垂直分量非 0（不继承）
+        val id: String?,       // F2.16：元素 id（锚点映射，块级元素取"其内首个段落"）
+        val anchorName: String? // F2.16：`<a name="x">` 旧式锚点
     )
 
     /** 归并命中元素（tag/id/class）的样式表规则：id>class>元素、同优先级后定义覆盖先定义 */
@@ -544,8 +579,14 @@ class EpubParser : DocumentParser {
         return acc
     }
 
-    /** 由声明 + 父级上下文构建计算样式帧（继承：未声明即取父级值） */
-    private fun buildFrame(tag: String, parent: StyleFrame?, decls: CssDecls): StyleFrame {
+    /** 由声明 + 父级上下文构建计算样式帧（继承：未声明即取父级值）；id/name 供 F2.16 锚点映射 */
+    private fun buildFrame(
+        tag: String,
+        parent: StyleFrame?,
+        decls: CssDecls,
+        id: String?,
+        anchorName: String?
+    ): StyleFrame {
         val parentFont = parent?.fontEm ?: 1f
         val parentLine = parent?.lineEm ?: 1f
         return StyleFrame(
@@ -557,7 +598,9 @@ class EpubParser : DocumentParser {
             italic = decls.styleRaw?.let { CssSubset.fontStyleItalic(it) } ?: parent?.italic,
             align = decls.alignRaw?.let { CssSubset.textAlignValue(it) } ?: parent?.align,
             colorArgb = decls.colorRaw?.let { CssSubset.parseColor(it) } ?: parent?.colorArgb,
-            spacing = decls.spacing ?: false
+            spacing = decls.spacing ?: false,
+            id = id,
+            anchorName = anchorName
         )
     }
 
@@ -839,6 +882,7 @@ class EpubParser : DocumentParser {
         val paragraphs = mutableListOf<String>()
         val images = mutableListOf<ParagraphImage>()
         val styles = mutableMapOf<Int, ParagraphStyleHints>()
+        val anchors = LinkedHashMap<String, Int>() // F2.16：元素 id / <a name> → 段落索引
         val cssRules = mutableListOf<CssRule>() // 本章已收集的 <style> 规则（head 先行 → body 全量命中）
         val frames = ArrayDeque<StyleFrame>()   // 开标签样式帧栈
         val sb = StringBuilder()
@@ -859,7 +903,7 @@ class EpubParser : DocumentParser {
             return null
         }
 
-        /** 段落收尾：非空白文本入 paragraphs，并以最近块级祖先帧的样式写 styles[新索引] */
+        /** 段落收尾：非空白文本入 paragraphs，并以最近块级祖先帧的样式写 styles[新索引]；同步记锚点 */
         fun flush() {
             val s = sb.toString().trim()
             sb.clear()
@@ -867,6 +911,13 @@ class EpubParser : DocumentParser {
             val idx = paragraphs.size
             paragraphs += s
             hintsOf(ownerFrame())?.let { styles[idx] = it }
+            // F2.16 锚点映射：段级 flush 时记录祖先元素 id / <a name> → 该段落。
+            // 遍历全部祖先：容器 id 因此映射到"其内首个段落"（putIfAbsent 保证首个命中不被后续覆盖）。
+            for (i in frames.indices.reversed()) {
+                val f = frames[i]
+                f.anchorName?.let { anchors.putIfAbsent(it, idx) }
+                if (f.tag !in inlineTags && f.id != null) anchors.putIfAbsent(f.id, idx)
+            }
         }
 
         /** 为当前元素开标签压样式帧（样式表命中规则 + 内联 style 覆盖） */
@@ -874,10 +925,12 @@ class EpubParser : DocumentParser {
             val id = parser.getAttributeValue(null, "id")
             val classAttr = parser.getAttributeValue(null, "class")
             val inlineRaw = parser.getAttributeValue(null, "style")
+            // F2.16：<a name="x"> 旧式锚点（仅 a 元素；其他元素的 name 不作为锚点）
+            val anchorName = if (tag == "a") parser.getAttributeValue(null, "name")?.takeIf { it.isNotBlank() } else null
             val parent = frames.lastOrNull()
             val decls = mergeRuleDecls(tag, id, classAttr, cssRules)
             if (inlineRaw != null) decls.overrideWith(CssSubset.parseDeclarations(inlineRaw))
-            frames.addLast(buildFrame(tag, parent, decls))
+            frames.addLast(buildFrame(tag, parent, decls, id, anchorName))
         }
 
         var event = parser.eventType
@@ -944,7 +997,20 @@ class EpubParser : DocumentParser {
                         tag == "img" || tag in voidTags -> {} // 无帧可 pop（XHTML 显式闭合 img 等）
                         else -> {
                             if (tag !in inlineTags) flush() // 块级结束：收尾本块余下文本（归属本块样式）
-                            if (frames.isNotEmpty()) frames.removeLast() // 与 pushFrameFor 对称
+                            val frame = frames.removeLastOrNull() // 与 pushFrameFor 对称
+                            // F2.16 锚点兜底目标（flush 未命中时）：
+                            //  - 行内标签且段落仍在累积（sb 非空，如段中闭合的 <a name>）→ 其**所在段落**（即将 flush 的 paragraphs.size）；
+                            //  - 块级标签（此处已先 flush，sb 必空）与 sb 为空的行内标签 → 最近前段落（章首兜底 0）。
+                            // 纯图章此值即合成宿主段 0（parseCore 合成空宿主段时锚点照常映射到该段）。
+                            if (frame != null) {
+                                val target = if (tag in inlineTags && sb.isNotEmpty()) {
+                                    paragraphs.size
+                                } else {
+                                    (paragraphs.size - 1).coerceAtLeast(0)
+                                }
+                                if (tag !in inlineTags) frame.id?.let { if (it !in anchors) anchors[it] = target }
+                                frame.anchorName?.let { if (it !in anchors) anchors[it] = target }
+                            }
                         }
                     }
                 }
@@ -952,7 +1018,7 @@ class EpubParser : DocumentParser {
             event = parser.next()
         }
         flush()
-        return ExtractedChapter(paragraphs, images, styles)
+        return ExtractedChapter(paragraphs, images, styles, anchors)
     }
 
     /** 剥标签正则降级：仅在 XmlPullParserException/IOException 时触发；head 一并剥除（同正文抽取契约）。无图信息，图片为空。 */
