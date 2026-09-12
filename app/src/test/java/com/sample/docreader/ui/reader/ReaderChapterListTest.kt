@@ -1,16 +1,18 @@
 package com.sample.docreader.ui.reader
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.Document
+import com.sample.docreader.core.model.TocEntry
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -19,10 +21,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * epub 章节列表（TC-F2-16/TC-UI-07，M10 F4.5）：章节列表入口（顶栏图标）、点击章节回调 0 起索引、
- * 当前章节高亮（selected 语义）、空白标题兜底"第 N 章"；章节面板底部上一章/下一章翻章。
- * 注：Robolectric 下弹层（AlertDialog/ModalBottomSheet）窗口内容不进语义树，列表主体 ChapterListContent
- * 与面板主体 ChapterSheetContent 直接驱动。
+ * epub 章节/目录面板（F2.16，M12c；取代 M10 的 spine 逐章列表）：
+ * - 数据源 = `Document.toc`（文件自带目录原样，**无「第 N 章」生成条目**），条目层级缩进 / selected 语义
+ *   复用 [TocListContent]（TC-UI-07 的交互契约保留，断言对象改为目录条目）；
+ * - 顶栏「章节列表」入口仅在 toc 非空时出现（无目录 epub 隐藏，F2.16/TC-F2-27）；
+ * - 面板底部保留上一章/下一章翻章（按 spine，与目录有无无关，F4.5/F4.7）。
+ * 注：Robolectric 下弹层（ModalBottomSheet）窗口内容不进语义树，面板主体 [ChapterSheetContent] 直接驱动。
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -31,99 +35,120 @@ class ReaderChapterListTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    // 第三章标题为空串 → 兜底"第 3 章"
+    private val toc = listOf(
+        TocEntry(1, "第一章", 0, chapterIndex = 0, anchorParagraph = 0),
+        TocEntry(1, "第二章", 0, chapterIndex = 1, anchorParagraph = 0),
+        TocEntry(2, "第二章之一", 0, chapterIndex = 1, anchorParagraph = 2),
+        TocEntry(1, "第三章", 0, chapterIndex = 2, anchorParagraph = 0)
+    )
+
     private val chapters = listOf(
         Chapter("第一章", listOf("第一章正文")),
         Chapter("第二章", listOf("第二章正文")),
-        Chapter("", listOf("第三章正文"))
+        Chapter(null, listOf("第三章正文"))
     )
 
-    /** TC-F2-16（M10 F4.5）：epub 顶栏有章节列表入口图标（原底部工具条按钮已移除，入口上移顶栏） */
+    private fun epubDocument(toc: List<TocEntry> = emptyList()) = Document(
+        "asset:///fixtures/anchor_toc.epub", "anchor_toc.epub", DocFormat.EPUB, chapters, toc = toc
+    )
+
+    /** F2.16/TC-F2-25：toc 非空时 epub 顶栏有「章节列表」入口，可点击打开面板（弹层不进语义树，不崩溃即可） */
     @Test
-    fun epub_topbar_hasChapterListEntry() {
+    fun epub_topbar_showsChapterEntry_whenTocNotEmpty() {
         composeRule.setContent {
             ReaderContent(
-                state = ReaderUiState(
-                    loading = false,
-                    document = Document("asset:///fixtures/sample.epub", "sample.epub", DocFormat.EPUB, chapters)
-                ),
+                state = ReaderUiState(loading = false, document = epubDocument(toc)),
                 onBack = {},
                 onFontSizeStep = { _ -> }
             )
         }
         composeRule.waitForIdle()
-        val entry = composeRule.onNodeWithContentDescription("章节列表")
-        // 顶栏常驻图标无需滚动（原底部工具条可横向滚动，M10 已移除）
-        entry.assertExists().assertIsDisplayed().performClick()
-        // 点击后弹层为 ModalBottomSheet，Robolectric 下不进语义树，不弹崩溃即视为可点；
-        // 列表/面板主体行为由下方直接驱动的用例覆盖（TC-UI-07）
+        composeRule.onNodeWithContentDescription("章节列表")
+            .assertExists().assertIsDisplayed().performClick()
         composeRule.waitForIdle()
     }
 
-    /** TC-F2-16：点第 2 章 → onSelect 回调索引 1（0 起） */
+    /** F2.16/TC-F2-27：无目录 epub（toc 空）隐藏「章节列表」入口，不提供生成式兜底 */
     @Test
-    fun chapterList_clickSecondChapter_callbacksIndex1() {
-        var selectedIndex: Int? = null
+    fun epub_topbar_hidesChapterEntry_whenTocEmpty() {
         composeRule.setContent {
-            ChapterListContent(chapters = chapters, currentIndex = 0, onSelect = { selectedIndex = it })
+            ReaderContent(
+                state = ReaderUiState(loading = false, document = epubDocument(emptyList())),
+                onBack = {},
+                onFontSizeStep = { _ -> }
+            )
         }
         composeRule.waitForIdle()
-
-        composeRule.onNodeWithText("第二章").performClick()
-        composeRule.waitForIdle()
-        assertEquals(1, selectedIndex)
+        composeRule.onNodeWithContentDescription("章节列表").assertDoesNotExist()
     }
 
-    /** TC-F2-16：当前章节高亮（selected），空白标题兜底"第 N 章" */
+    /** F2.16：面板条目 = 文件自带目录原样（标题/层级），点击回调携带对应 TocEntry（含章坐标/锚点） */
     @Test
-    fun chapterList_currentSelectedAndBlankTitleFallback() {
-        composeRule.setContent {
-            ChapterListContent(chapters = chapters, currentIndex = 1, onSelect = {})
-        }
-        composeRule.waitForIdle()
-
-        // 空标题兜底为"第 3 章"
-        composeRule.onNodeWithText("第 3 章").assertIsDisplayed()
-        // 当前章节（第二章）selected，其余未选
-        composeRule.onNodeWithText("第二章").assertIsSelected()
-        composeRule.onNodeWithText("第一章").assertIsNotSelected()
-        composeRule.onNodeWithText("第 3 章").assertIsNotSelected()
-    }
-
-    /**
-     * TC-UI-07（M10 F4.5）：章节面板主体 ChapterSheetContent 直驱——
-     * 上一章/下一章按钮存在且点击触发回调；当前章节 selected 语义保留（ChapterListContent 既有用例不回退）。
-     */
-    @Test
-    fun chapterSheet_hasPrevNext_andCurrentSelected() {
-        var prevCalls = 0
-        var nextCalls = 0
-        val selects = mutableListOf<Int>()
+    fun chapterSheet_clickEntry_carriesEntry() {
+        var selected: TocEntry? = null
         composeRule.setContent {
             ChapterSheetContent(
-                chapters = chapters,
-                currentIndex = 1,
-                onSelect = { selects += it },
-                onPrev = { prevCalls++ },
-                onNext = { nextCalls++ }
+                toc = toc,
+                selectedIndex = 0,
+                onSelect = { selected = it },
+                onPrev = {},
+                onNext = {},
+                prevEnabled = false,
+                nextEnabled = true
             )
         }
         composeRule.waitForIdle()
 
-        // 当前章节（第二章）selected 语义保留，非当前章未选
-        composeRule.onNodeWithText("第二章").assertIsSelected()
+        composeRule.onNodeWithText("第三章").performClick()
+        composeRule.waitForIdle()
+        assertEquals(TocEntry(1, "第三章", 0, chapterIndex = 2, anchorParagraph = 0), selected)
+    }
+
+    /** F2.16：当前目录条目高亮（selected 语义），其余未选 */
+    @Test
+    fun chapterSheet_selectedSemantics() {
+        composeRule.setContent {
+            ChapterSheetContent(
+                toc = toc,
+                selectedIndex = 2,
+                onSelect = {},
+                onPrev = {},
+                onNext = {},
+                prevEnabled = true,
+                nextEnabled = true
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("第二章之一").assertIsSelected()
         composeRule.onNodeWithText("第一章").assertIsNotSelected()
+    }
 
-        // 上一章/下一章按钮存在；currentIndex=1 时首末章均在界内，两按钮可点且触发各自回调
-        composeRule.onNodeWithContentDescription("上一章").assertExists().performClick()
-        composeRule.onNodeWithContentDescription("下一章").assertExists().performClick()
+    /**
+     * TC-UI-07（F4.5/F4.7）：面板底部上一章/下一章翻章按钮存在、点击触发回调；
+     * 边界章置灰由 prevEnabled/nextEnabled 表达（首章禁上一章、末章禁下一章）。
+     */
+    @Test
+    fun chapterSheet_hasPrevNext_andEnabledFlags() {
+        var prevCalls = 0
+        var nextCalls = 0
+        composeRule.setContent {
+            ChapterSheetContent(
+                toc = toc,
+                selectedIndex = 0,
+                onSelect = {},
+                onPrev = { prevCalls++ },
+                onNext = { nextCalls++ },
+                prevEnabled = false,
+                nextEnabled = true
+            )
+        }
         composeRule.waitForIdle()
-        assertEquals(1, prevCalls)
+
+        composeRule.onNodeWithContentDescription("上一章").assertExists().assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("下一章").assertExists().assertIsEnabled().performClick()
+        composeRule.waitForIdle()
+        assertEquals(0, prevCalls)
         assertEquals(1, nextCalls)
-
-        // 面板内点章节仍触发 onSelect（面板内翻章后可继续选章节，F4.5）
-        composeRule.onNodeWithText("第 3 章").performClick()
-        composeRule.waitForIdle()
-        assertEquals(listOf(2), selects)
     }
 }

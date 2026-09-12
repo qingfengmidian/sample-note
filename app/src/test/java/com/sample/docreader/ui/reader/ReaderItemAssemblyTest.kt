@@ -83,7 +83,7 @@ class ReaderItemAssemblyTest {
         assertEquals("纯图章宿主段承载图片", listOf(hostImage), items[0].images)
         assertTrue("图版章的宿主段即章首", items[0].isChapterFirst)
 
-        assertTrue("全空章书不产出 item", assembleReaderItems(sizedChapters(3, 0, 0), materializedCount = 3).isEmpty())
+        assertTrue("全空章书不产出 item", assembleReaderItems(sizedChapters(0, 0, 0), materializedCount = 3).isEmpty())
     }
 
     /** 空书 / 越界窗口：不抛异常 */

@@ -270,12 +270,25 @@ class ReaderViewModel(
             else -> throw ParseException.UnsupportedFormat()
         }
 
-    /** 跳转到指定章节（epub），越界忽略；切换后从章首开始并记录进度（F2.7） */
+    /**
+     * 跳转到指定章节（epub），越界忽略；切换后从章首开始并记录进度（F2.7）。
+     * M12c（F4.7）扩展：同时物化到该章（连续滚动窗口不缩小）并置全局 item 恢复目标
+     * （`restoreItem = globalItem(index, 0)`）；既有 `restoreParagraph = 0` 与立即落库行为保持不变。
+     */
     fun selectChapter(index: Int) {
         val document = _uiState.value.document ?: return
         if (index !in document.chapters.indices) return
         currentParagraph = 0
-        _uiState.update { it.copy(chapterIndex = index, restoreParagraph = 0) }
+        val map = itemMap
+        _uiState.update {
+            val materialized = (index + 1).coerceIn(0, document.chapters.size)
+            it.copy(
+                chapterIndex = index,
+                restoreParagraph = 0,
+                materializedChapterCount = maxOf(it.materializedChapterCount, materialized),
+                restoreItem = map?.globalItem(index, 0) ?: 0
+            )
+        }
         flushPendingProgress() // G4-code：切章前把未落盘的滚动进度兜底写一次
         persistProgress(index, 0)
     }
@@ -299,6 +312,20 @@ class ReaderViewModel(
 
     /** UI 完成一次 restoreParagraph 滚动后调用，清除一次性目标 */
     fun consumeRestoreParagraph() = _uiState.update { it.copy(restoreParagraph = null) }
+
+    /**
+     * F2.16/M12c：epub 目录条目跳转——[itemIndex] 为**全局 item 坐标**（UI 经
+     * [ChapterItemMap.globalItem] 由目录条目的章坐标/锚点段落换算）。
+     * 经 [ChapterItemMap.locate] 换算为 `(chapter, paragraph)`，当前章跟随，并**立即落库**（不经防抖），
+     * 语义同 [onTocJumpToParagraph] 但坐标为全局 item（保证跳转后立刻退出/杀进程，重开仍回到锚点）。
+     */
+    fun onTocJumpToItem(itemIndex: Int) {
+        val map = itemMap ?: return
+        val pos = map.locate(itemIndex)
+        currentParagraph = pos.paragraph
+        _uiState.update { it.copy(chapterIndex = pos.chapter) }
+        persistProgress(pos.chapter, pos.paragraph)
+    }
 
     // ---- F4.7（M12b）：跨章连续滚动的 VM 层坐标系与章级窗口（加法式，既有 API 行为不变）----
 

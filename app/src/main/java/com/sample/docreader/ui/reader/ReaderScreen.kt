@@ -196,10 +196,16 @@ fun ReaderScreen(
         onSelectChapter = viewModel::selectChapter,
         onPrevChapter = { viewModel.selectChapter(state.chapterIndex - 1) },
         onNextChapter = { viewModel.selectChapter(state.chapterIndex + 1) },
-        onFirstVisibleParagraphChanged = viewModel::onFirstVisibleParagraphChanged,
+        // F4.7（M12c）：滚动上报为**全局 item**，VM 经 ChapterItemMap.locate 换算进度坐标（单章时等价段落）
+        onFirstVisibleParagraphChanged = viewModel::onFirstVisibleItemChanged,
         onRestoreParagraphConsumed = viewModel::consumeRestoreParagraph,
         onLoadMore = viewModel::loadMore,
         onTocJumpToParagraph = viewModel::onTocJumpToParagraph,
+        // M12c：章级渐进物化 + epub 目录锚点跳转 + 全局 item 恢复
+        onAppendNextChapter = viewModel::appendNextChapter,
+        onEnsureMaterialized = viewModel::ensureMaterialized,
+        onTocJumpToItem = viewModel::onTocJumpToItem,
+        onRestoreItemConsumed = viewModel::consumeRestoreItem,
         onEdit = onEdit
     )
 }
@@ -232,17 +238,34 @@ fun ReaderContent(
     onLoadMore: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
     // F2.13（S3 方案①）：目录跳转完成后的进度上报回调（预览模式跳转也必须上报，供 VM 落库）
-    onTocJumpToParagraph: ((Int) -> Unit)? = null
+    onTocJumpToParagraph: ((Int) -> Unit)? = null,
+    // M12c（F4.7/F4.8/F2.16）：章级渐进物化、epub 目录锚点跳转、全局 item 恢复目标
+    onAppendNextChapter: (() -> Unit)? = null,
+    onEnsureMaterialized: ((Int) -> Unit)? = null,
+    onTocJumpToItem: ((Int) -> Unit)? = null,
+    onRestoreItemConsumed: (() -> Unit)? = null
 ) {
     val settings = state.settings
     val theme = resolveReadingTheme(settings.theme)
-    val chapters = state.document?.chapters.orEmpty()
+    val document = state.document
+    val chapters = document?.chapters.orEmpty()
     val chapter = chapters.getOrNull(state.chapterIndex)
     val paragraphs = chapter?.paragraphs
-    val toc = state.document?.toc.orEmpty() // F2.13：md 目录锚点（xml/txt/epub 为空）
-    val isEpub = state.document?.format == DocFormat.EPUB
-    val isMd = state.document?.format == DocFormat.MD
-    val isTxt = state.document?.format == DocFormat.TXT
+    val toc = document?.toc.orEmpty() // F2.13/F2.16：md 标题目录 / epub 文件自带目录
+    val isEpub = document?.format == DocFormat.EPUB
+    val isMd = document?.format == DocFormat.MD
+    val isTxt = document?.format == DocFormat.TXT
+    // F4.7（M12c）：全书 item 前缀和映射；物化窗口以 VM 状态为准（count 0 为未初始化/测试直驱，
+    // 至少物化当前章，避免正文空白），只组装前 materializedCount 章。
+    val itemMap = remember(document) { ChapterItemMap(chapters) }
+    val materializedCount = if (chapters.isEmpty()) 0
+        else maxOf(state.materializedChapterCount, state.chapterIndex + 1, 1)
+    val items = remember(document, materializedCount) {
+        assembleReaderItems(chapters, materializedCount)
+    }
+    // 空态判定上移到整本（连续滚动下不再只看当前章）：全空段落且无图才判空（M3 纯图章不回归）
+    val isEmptyDoc = chapters.isEmpty() ||
+        chapters.all { ch -> ch.paragraphs.all { it.isBlank() } && ch.images.isEmpty() }
     // rememberSaveable：旋转/重建后不丢预览状态
     var mdPreview by rememberSaveable { mutableStateOf(false) }
     val mdBlocks = remember(paragraphs, isMd) {
@@ -255,6 +278,8 @@ fun ReaderContent(
     var tocSheetOpen by remember { mutableStateOf(false) }
     var tocJumpParagraph by remember { mutableIntStateOf(-1) }
     var switchScrollTarget by remember { mutableIntStateOf(-1) }
+    // F4.7/F4.8：目录/进度条跳转的全局 item 目标（一次性；未物化时待窗口扩展后消费）
+    var pendingItemScroll by remember { mutableIntStateOf(-1) }
 
     // U4：源码↔预览切换位置映射——两个视图共享同一 listState 但 item 语义不同（源码=段落、预览=块），
     // 切换前记录当前位置并在重组后滚到经块↔段落映射换算的目标（保持一致阅读语义，而非同序号不同内容）。
@@ -322,10 +347,27 @@ fun ReaderContent(
             .collect { onFirstVisibleParagraphChanged?.invoke(it) }
     }
 
-    // 加载恢复/切章后的一次性滚动目标
-    LaunchedEffect(state.restoreParagraph) {
-        state.restoreParagraph?.let { p ->
-            listState.scrollToItem(p)
+    // F4.7（M12c）：目录/进度条跳转的一次性全局 item 滚动目标——未物化时目标超出当前 item 数，
+    // 待 ensureMaterialized 触发重组、items 增长后消费（同一坐标只滚一次）。
+    LaunchedEffect(items.size, pendingItemScroll) {
+        val target = pendingItemScroll
+        if (target >= 0 && target < items.size) {
+            listState.scrollToItem(target)
+            pendingItemScroll = -1
+        }
+    }
+
+    // 加载/切章恢复的一次性滚动目标：全局 item 优先（epub 多章正确坐标），
+    // restoreParagraph 作为单章（md/txt/xml）与既有测试接缝的兼容路径保留。
+    LaunchedEffect(state.restoreItem, state.restoreParagraph, items.size) {
+        val targetItem = state.restoreItem
+        val targetParagraph = state.restoreParagraph
+        if (targetItem != null && targetItem in 0 until items.size) {
+            listState.scrollToItem(targetItem)
+            onRestoreItemConsumed?.invoke()
+            if (targetParagraph != null) onRestoreParagraphConsumed?.invoke()
+        } else if (!isEpub && targetParagraph != null) {
+            listState.scrollToItem(targetParagraph)
             onRestoreParagraphConsumed?.invoke()
         }
     }
@@ -348,6 +390,25 @@ fun ReaderContent(
             }
     }
 
+    // F4.7（M12c）：非 txt（epub/md/xml）触底追加下一章——滚近已物化尾部（PREFETCH_MARGIN）且仍有
+    // 未物化章时 appendNextChapter；txt 走上方分块 loadMore，两路径互斥不重复触发。
+    val latestItemsSize by rememberUpdatedState(items.size)
+    val latestChapterCount by rememberUpdatedState(chapters.size)
+    LaunchedEffect(listState, isTxt) {
+        if (isTxt) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { lastVisible ->
+                val s = latestState
+                if (lastVisible >= 0 &&
+                    lastVisible >= latestItemsSize - PagedTextLoader.PREFETCH_MARGIN &&
+                    s.materializedChapterCount < latestChapterCount
+                ) {
+                    onAppendNextChapter?.invoke()
+                }
+            }
+    }
+
     var chapterSheetOpen by remember { mutableStateOf(false) }
     var settingsSheetOpen by remember { mutableStateOf(false) }
 
@@ -356,8 +417,9 @@ fun ReaderContent(
         topBar = {
             TopAppBar(
                 title = {
+                    // R3（F2.16）：只显示当前章匹配到的目录条目标题；无匹配留空（**不再回落书名/「第 N 章」**）
                     Text(
-                        chapter?.title?.takeIf { it.isNotBlank() } ?: state.document?.name.orEmpty(),
+                        chapter?.title?.takeIf { it.isNotBlank() }.orEmpty(),
                         maxLines = 1
                     )
                 },
@@ -367,8 +429,8 @@ fun ReaderContent(
                     }
                 },
                 actions = {
-                    // F4.5：epub 章节入口上移顶栏图标
-                    if (isEpub) {
+                    // F4.5/F2.16：epub 章节/目录入口上移顶栏图标；文件无目录（toc 空）时隐藏，不做生成式兜底
+                    if (isEpub && toc.isNotEmpty()) {
                         IconButton(onClick = { chapterSheetOpen = true }) {
                             Icon(Icons.AutoMirrored.Filled.List, contentDescription = "章节列表")
                         }
@@ -452,45 +514,67 @@ fun ReaderContent(
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 // TC-F2-24：空文件/空章节（0 字节、全空段落或 epub 空 spine）显示空态提示。
                 // M3：某章 images 非空（纯图章，解析层已合成空宿主段落）时不得判空——需渲染图片；
-                // 真正无图真空章仍走既有空态（TC-F2-24 不回归）。
-                (paragraphs.isNullOrEmpty() || paragraphs.all { it.isBlank() }) &&
-                    chapter?.images.isNullOrEmpty() != false -> Text(
+                // F4.7 连续滚动下空态判定上移到整本（isEmptyDoc），真正无图真空章仍走既有空态。
+                isEmptyDoc -> Text(
                     "文件为空",
                     color = theme.foreground,
                     modifier = Modifier.align(Alignment.Center)
                 )
                 isMd && mdPreview -> MarkdownPreview(mdBlocks, settings, listState, theme)
                 else -> ReaderTextView(
-                    paragraphs.orEmpty(),
-                    settings,
-                    listState,
-                    // F2.14：epub 章节图片挂段落 item 内渲染；图片文件根 = epub 解压缓存目录（imageRoot）
-                    images = chapter?.images.orEmpty(),
-                    imageRoot = state.document?.imageRoot,
-                    // F2.15：epub 章节段样式提示（仅 epub 非空；txt/md/xml 空表零影响）
-                    styles = chapter?.styles.orEmpty()
+                    items = items,
+                    settings = settings,
+                    listState = listState,
+                    // F2.14：epub 图片文件根 = epub 解压缓存目录（imageRoot）；图片/样式已按段组装进 item
+                    imageRoot = document?.imageRoot
+                )
+            }
+            // F4.8（M12c）：右缘全书进度条；设置/目录面板打开或 md 预览（块坐标）时隐藏
+            if (document != null && !state.loading && !isEmptyDoc && !mdPreview && items.isNotEmpty() &&
+                !settingsSheetOpen && !chapterSheetOpen && !tocSheetOpen
+            ) {
+                val progressTotal = if (state.totalItems > 0) state.totalItems else items.size
+                ReaderProgressBar(
+                    listState = listState,
+                    totalItems = progressTotal,
+                    theme = theme,
+                    onSeek = { target ->
+                        // 未物化章先物化，再经 pendingItemScroll 待窗口扩展后滚动（F4.8/TC-UI-11）
+                        onEnsureMaterialized?.invoke(itemMap.locate(target).chapter)
+                        pendingItemScroll = target
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd)
                 )
             }
         }
     }
 
-    // F4.5：章节面板升级为 ModalBottomSheet（原 AlertDialog），底部内置上一章/下一章翻章
+    // F4.5/F2.16：epub 章节/目录面板（ModalBottomSheet）——数据源为 Document.toc（文件自带目录原样，
+    // 无「第 N 章」生成条目），底部内置上一章/下一章翻章（按 spine，与目录有无无关）。
     if (chapterSheetOpen) {
+        // 当前可见位置的目录高亮基准：epub 用全局 item 换算的章内段落（面板打开时才读取，不牵连正文重组）
+        val visibleParagraph = itemMap.locate(listState.firstVisibleItemIndex.coerceAtLeast(0)).paragraph
         ModalBottomSheet(
             onDismissRequest = { chapterSheetOpen = false },
             containerColor = theme.background,
             contentColor = theme.foreground
         ) {
             ChapterSheetContent(
-                chapters = chapters,
-                currentIndex = state.chapterIndex,
-                onSelect = { index ->
+                toc = toc,
+                selectedIndex = epubTocSelectedIndex(toc, state.chapterIndex, visibleParagraph),
+                onSelect = { entry ->
                     chapterSheetOpen = false
-                    onSelectChapter?.invoke(index)
+                    // F2.16：锚点跳转——目标章未物化先物化，再滚到锚点全局 item 并立即落库
+                    val target = itemMap.globalItem(entry.chapterIndex, entry.anchorParagraph ?: 0)
+                    onEnsureMaterialized?.invoke(entry.chapterIndex)
+                    pendingItemScroll = target
+                    onTocJumpToItem?.invoke(target)
                 },
                 // 面板内翻章后停留在面板可继续选（F4.5）
                 onPrev = { onPrevChapter?.invoke() },
-                onNext = { onNextChapter?.invoke() }
+                onNext = { onNextChapter?.invoke() },
+                prevEnabled = state.chapterIndex > 0,
+                nextEnabled = state.chapterIndex < chapters.lastIndex
             )
         }
     }
@@ -498,10 +582,11 @@ fun ReaderContent(
     // F2.13：md 目录面板（复用章节面板交互模式，F4.5）。当前标题高亮（S11：首可见段落
     // 位于第一个目录标题之前时无高亮，selectedIndex = -1）；点击目录项关闭面板并跳转（经 tocJumpParagraph）。
     if (tocSheetOpen) {
+        val firstVisibleItem = listState.firstVisibleItemIndex.coerceAtLeast(0)
         val visibleParagraph = if (mdPreview)
-            mapping.paragraphIndexForBlock(mdBlocks, listState.firstVisibleItemIndex.coerceAtLeast(0))
+            mapping.paragraphIndexForBlock(mdBlocks, firstVisibleItem)
         else
-            listState.firstVisibleItemIndex.coerceAtLeast(0)
+            firstVisibleItem
         val selectedTocIndex = mapping.tocIndexAtParagraph(visibleParagraph, toc)
         ModalBottomSheet(
             onDismissRequest = { tocSheetOpen = false },
@@ -548,17 +633,19 @@ fun ReaderContent(
 }
 
 /**
- * 章节面板主体（F4.5）：章节列表（高亮/缩进/selected 语义不变，见 [ChapterListContent]）
- * + 底部上一章/下一章翻章按钮（边界章节置灰）。
- * 从 ModalBottomSheet 抽出以便 Robolectric 直驱（同 AlertDialog 时代的 ChapterListContent 做法）。
+ * epub 章节/目录面板主体（F4.5/F2.16）：数据源为 [toc]（文件自带目录原样，条目/标题/层级均不改写，
+ * 见 [TocListContent]）+ 底部上一章/下一章翻章按钮（按 spine，边界置灰，与目录有无无关）。
+ * 从 ModalBottomSheet 抽出以便 Robolectric 直驱（同 md 目录面板 TocSheetContent 的做法）。
  */
 @Composable
 internal fun ChapterSheetContent(
-    chapters: List<com.sample.docreader.core.model.Chapter>,
-    currentIndex: Int,
-    onSelect: (Int) -> Unit,
+    toc: List<TocEntry>,
+    selectedIndex: Int,
+    onSelect: (TocEntry) -> Unit,
     onPrev: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    prevEnabled: Boolean,
+    nextEnabled: Boolean
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Text(
@@ -566,14 +653,14 @@ internal fun ChapterSheetContent(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(vertical = 8.dp)
         )
-        ChapterListContent(chapters, currentIndex, onSelect)
+        TocListContent(toc, selectedIndex, onSelect)
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             TextButton(
                 onClick = onPrev,
-                enabled = currentIndex > 0,
+                enabled = prevEnabled,
                 modifier = Modifier
                     .weight(1f)
                     .defaultMinSize(minHeight = 48.dp)
@@ -581,7 +668,7 @@ internal fun ChapterSheetContent(
             ) { Text("上一章") }
             TextButton(
                 onClick = onNext,
-                enabled = currentIndex < chapters.lastIndex,
+                enabled = nextEnabled,
                 modifier = Modifier
                     .weight(1f)
                     .defaultMinSize(minHeight = 48.dp)
@@ -589,6 +676,21 @@ internal fun ChapterSheetContent(
             ) { Text("下一章") }
         }
     }
+}
+
+/**
+ * epub 目录当前高亮条目（F2.16）：取最后一个「章坐标不晚于当前阅读位置」的条目；
+ * 首个条目之前返回 -1（无高亮，与 md 的 S11 语义一致）。纯函数便于单测。
+ */
+internal fun epubTocSelectedIndex(toc: List<TocEntry>, chapter: Int, paragraph: Int): Int {
+    var selected = -1
+    toc.forEachIndexed { index, entry ->
+        val anchor = entry.anchorParagraph ?: 0
+        if (entry.chapterIndex < chapter || (entry.chapterIndex == chapter && anchor <= paragraph)) {
+            selected = index
+        }
+    }
+    return selected
 }
 
 /**
@@ -756,37 +858,6 @@ private fun SheetRadioOption(
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         if (selected) {
             Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-/** 章节列表主体：按 Chapter.level 缩进展示嵌套层级，当前章节高亮（主色+加粗+selected 语义），点击跳转 */
-@Composable
-internal fun ChapterListContent(
-    chapters: List<com.sample.docreader.core.model.Chapter>,
-    currentIndex: Int,
-    onSelect: (Int) -> Unit
-) {
-    LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
-        itemsIndexed(chapters, key = { index, _ -> index }) { index, chapter ->
-            val isCurrent = index == currentIndex
-            Text(
-                // 与 topBar 一致：空白标题兜底"第 N 章"
-                chapter.title?.takeIf { it.isNotBlank() } ?: "第 ${index + 1} 章",
-                // 当前章节高亮（加粗 + 主色）
-                color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
-                fontWeight = if (isCurrent) FontWeight.Bold else null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onSelect(index) }
-                    .semantics { selected = isCurrent } // 供无障碍与 UI 测试识别当前章节
-                    .padding(
-                        start = ((chapter.level - 1) * 16).dp,
-                        end = 16.dp,
-                        top = 12.dp,
-                        bottom = 12.dp
-                    )
-            )
         }
     }
 }

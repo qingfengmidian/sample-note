@@ -167,23 +167,23 @@ internal fun applyParagraphHints(
 
 
 /**
- * 阅读排版组件（设计§3.3 + §3.3 epub 富文本 F2.14）：
+ * 阅读排版组件（设计§3.3 + §3.8 epub 连续滚动 F4.7）：
+ * - 入参为 flatten 后的 [items]（多章按段组装，章节概念上移至 VM/Screen）；item key = "章:段" 稳定复合键，只 append 不重排；
  * - WRAP：段落 Text 充满宽度自然折行；NO_WRAP：每段放入可水平滚动的 Row，整行绘制；
  *   两种模式段落间都分行；
- * - F2.14 图片：渲染在所属段落 item 内（**不新增 LazyColumn 项**，item 索引 == 段落索引不变量，评审 S8）——
- *   封面图（isCover）在首段文字上方，其余图在所属段落文字下方；svg/解码失败/文件缺失给占位提示（S9 语义）；
- * - F2.15 样式：styles[段落索引] 仅作用于该段落 Text 的 TextStyle（合并规则见 [applyParagraphHints]）；
+ * - F2.14 图片：渲染在所属段落 item 内（**不新增 LazyColumn 项**，评审 S8）——封面图（isCover）在段文字上方，
+ *   其余图在段文字下方；svg/解码失败/文件缺失给占位提示（S9 语义）；图片直接取 [ReaderItem.images]，
+ *   **不再按下标查章内表**（F4.7 多章 flatten 后章内下标不再是全局 item 下标）；
+ * - F2.15 样式：直接取 [ReaderItem.styles] 作用于该段 Text（合并规则见 [applyParagraphHints]）；
  *   段距只做 0/非 0 两档（item 垂直内边距），styles 空（txt/md/xml/无样式 epub）路径与旧版一致；
  * - 背景色应用容器、前景色应用正文 Text；整体包 SelectionContainer 支持长按选择复制（F2.12）。
  */
 @Composable
 fun ReaderTextView(
-    paragraphs: List<String>,
+    items: List<ReaderItem>,
     settings: ReadingSettings,
     listState: LazyListState,
-    images: List<ParagraphImage> = emptyList(),
     imageRoot: String? = null,
-    styles: Map<Int, ParagraphStyleHints> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     val theme = resolveReadingTheme(settings.theme)
@@ -193,8 +193,6 @@ fun ReaderTextView(
         lineHeight = lineHeightSp(settings),
         fontFamily = fontFamilyFor(settings.font, settings.customFontPath)
     )
-    // 段落 → 图片分组（仅所属段落的图在本 item 内渲染，评审 S8）
-    val imagesByParagraph = remember(images) { images.groupBy { it.paragraphIndex } }
     SelectionContainer {
         LazyColumn(
             state = listState,
@@ -209,12 +207,11 @@ fun ReaderTextView(
                     this[ReaderFontFamilyKey] = textStyle.fontFamily ?: FontFamily.Default
                 }
         ) {
-            itemsIndexed(paragraphs, key = { index, _ -> index }) { itemIndex, paragraph ->
-                val itemImages = imagesByParagraph[itemIndex].orEmpty()
-                val covers = itemImages.filter { it.isCover }      // 封面：该段文字上方
-                val below = itemImages.filter { !it.isCover }      // 正文图：该段文字下方
+            itemsIndexed(items, key = { _, item -> "${item.chapter}:${item.paragraph}" }) { _, item ->
+                val covers = item.images.filter { it.isCover }      // 封面：该段文字上方
+                val below = item.images.filter { !it.isCover }      // 正文图：该段文字下方
                 // F2.15：本段样式合并 + 0/非 0 两档段距（非 0 段距加大 item 垂直内边距）
-                val hints = styles[itemIndex]
+                val hints = item.styles
                 val paragraphStyle = applyParagraphHints(textStyle, hints, theme)
                 val itemVerticalPad = if (hints?.paragraphSpacing == true) 8.dp else 4.dp
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -225,11 +222,11 @@ fun ReaderTextView(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = itemVerticalPad)
                     when (settings.wrapMode) {
-                        WrapMode.WRAP -> Text(paragraph, style = paragraphStyle, modifier = itemModifier)
+                        WrapMode.WRAP -> Text(item.text, style = paragraphStyle, modifier = itemModifier)
                         WrapMode.NO_WRAP ->
                             Row(itemModifier.horizontalScroll(rememberScrollState())) {
                                 Text(
-                                    paragraph,
+                                    item.text,
                                     style = paragraphStyle,
                                     softWrap = false,
                                     maxLines = Int.MAX_VALUE

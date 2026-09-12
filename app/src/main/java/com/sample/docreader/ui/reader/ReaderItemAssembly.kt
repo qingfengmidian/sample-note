@@ -28,5 +28,24 @@ data class ReaderItem(
  * - `styles` 取 `chapter.styles[段落索引]`（无则 null）；
  * - `isChapterFirst` 仅在该章首个 item 上为 true（纯图章若段落非空，首个宿主段即章首）。
  */
-fun assembleReaderItems(chapters: List<Chapter>, materializedCount: Int): List<ReaderItem> =
-    TODO("M12c 实现")
+fun assembleReaderItems(chapters: List<Chapter>, materializedCount: Int): List<ReaderItem> {
+    if (chapters.isEmpty() || materializedCount <= 0) return emptyList()
+    val count = materializedCount.coerceAtMost(chapters.size)
+    val result = ArrayList<ReaderItem>()
+    for (chapterIndex in 0 until count) {
+        val chapter = chapters[chapterIndex]
+        // 图片按所属段落分组一次（保持原相对顺序），避免逐段线性扫描
+        val imagesByParagraph = chapter.images.groupBy { it.paragraphIndex }
+        chapter.paragraphs.forEachIndexed { paragraphIndex, text ->
+            result += ReaderItem(
+                chapter = chapterIndex,
+                paragraph = paragraphIndex,
+                text = text,
+                images = imagesByParagraph[paragraphIndex].orEmpty(),
+                styles = chapter.styles[paragraphIndex],
+                isChapterFirst = paragraphIndex == 0
+            )
+        }
+    }
+    return result
+}
