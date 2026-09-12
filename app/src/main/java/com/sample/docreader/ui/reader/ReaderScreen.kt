@@ -529,7 +529,9 @@ fun ReaderContent(
                     imageRoot = document?.imageRoot
                 )
             }
-            // F4.8（M12c）：右缘全书进度条；设置/目录面板打开或 md 预览（块坐标）时隐藏
+            // F4.8（M12c）进度条：真机反馈观感不佳，2026-09-12 起**暂时隐藏**（组件 ReaderProgressBar.kt
+            // 完整保留，恢复时取消下方注释即可；对应的 Robolectric/设备端进度条用例已 @Ignore 同步停用）。
+            /*
             if (document != null && !state.loading && !isEmptyDoc && !mdPreview && items.isNotEmpty() &&
                 !settingsSheetOpen && !chapterSheetOpen && !tocSheetOpen
             ) {
@@ -546,6 +548,7 @@ fun ReaderContent(
                     modifier = Modifier.align(Alignment.CenterEnd)
                 )
             }
+            */
         }
     }
 

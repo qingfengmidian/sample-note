@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -96,6 +97,7 @@ class ReaderWindowTest {
     }
 
     /** 2. TC-UI-11：进度条比例与拖动物化 */
+    @Ignore("F4.8 进度条真机反馈观感不佳已暂时隐藏（2026-09-12），组件保留；恢复渲染时同步移除 @Ignore")
     @Test
     fun progressBar_fractionAndSeekMaterializesTargetChapter() {
         // 纯函数：比例 = index/(totalItems-1)，target = round(fraction*(total-1))

@@ -20,6 +20,7 @@ import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sample.docreader.ui.reader.READER_PROGRESS_TAG
 import org.junit.Assert.assertNotEquals
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -86,6 +87,7 @@ class ReaderWindowDeviceTest {
      * TC-F4-09/10 设备端：many_chapters.epub（>100 章）全书进度条存在；
      * 拖动到末尾后语义描述（第 x/y 段）发生变化（位置变化），未崩溃。
      */
+    @Ignore("F4.8 进度条真机反馈观感不佳已暂时隐藏（2026-09-12），组件保留；恢复渲染时同步移除 @Ignore")
     @Test
     fun progressBar_exists_andSeekChangesPosition() {
         openEpubFixture("many_chapters.epub")
