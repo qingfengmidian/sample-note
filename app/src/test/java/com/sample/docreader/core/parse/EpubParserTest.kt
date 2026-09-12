@@ -407,6 +407,141 @@ class EpubParserTest {
         assertTrue("纯矢量 svg 封面不提取", chPureVector.images.isEmpty())
     }
 
+    /**
+     * F2.14 扩展（M12 真机缺陷）：正文 svg 内嵌位图按 img 同规则提取——
+     * 扫描版扉页/版权页常以 <svg><image xlink:href> 整页内嵌，不提取则该章解析为纯空章，
+     * 连续滚动打开即白屏卡死（真机《邓小平文选》书名页复现）。
+     */
+    @Test
+    fun m12_bodySvgInnerBitmap_extractedLikeImg() = runBlocking {
+        val doc = parser.parseBytes(
+            buildRawEpub(
+                opf = """
+                    |<?xml version="1.0" encoding="UTF-8"?>
+                    |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                    |<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+                    |<manifest>
+                    |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                    |</manifest>
+                    |<spine><itemref idref="ch1"/></spine>
+                    |</package>
+                    |""".trimMargin(),
+                files = mapOf(
+                    "OEBPS/ch1.xhtml" to minimalChapter(
+                        """<div><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">""" +
+                            """<image xlink:href="images/page.jpeg" width="1140" height="1600"/></svg></div>""" +
+                            """<p>正文。</p>"""
+                    ),
+                    "OEBPS/images/page.jpeg" to byteArrayOf(0x03)
+                )
+            ),
+            "body_svg_inner.epub"
+        )
+        val ch = doc.chapters[0]
+        assertEquals(1, ch.images.size)
+        val img = ch.images[0]
+        assertEquals("OEBPS/images/page.jpeg", img.src)
+        assertNull(img.alt)
+        assertFalse(img.isCover)
+        // 归属规则同 img：svg 前无未 flush 文本 → 挂最近已 flush 段（章首兜底 0）
+        assertEquals(0, img.paragraphIndex)
+        assertEquals(listOf("正文。"), ch.paragraphs)
+    }
+
+    /** M12 真机缺陷：整章仅 svg 内嵌位图（扫描扉页）→ 命中 M3 纯图章契约合成宿主段，章节非空 */
+    @Test
+    fun m12_svgOnlyChapter_hostParagraphSynthesized() = runBlocking {
+        val doc = parser.parseBytes(
+            buildRawEpub(
+                opf = """
+                    |<?xml version="1.0" encoding="UTF-8"?>
+                    |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+                    |<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+                    |<manifest>
+                    |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                    |</manifest>
+                    |<spine><itemref idref="ch1"/></spine>
+                    |</package>
+                    |""".trimMargin(),
+                files = mapOf(
+                    "OEBPS/ch1.xhtml" to minimalChapter(
+                        """<div><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">""" +
+                            """<image xlink:href="images/title.jpeg"/></svg></div>"""
+                    ),
+                    "OEBPS/images/title.jpeg" to byteArrayOf(0x04)
+                )
+            ),
+            "svg_only_chapter.epub"
+        )
+        val ch = doc.chapters[0]
+        assertEquals("纯图章应合成空宿主段", listOf(""), ch.paragraphs)
+        assertEquals(1, ch.images.size)
+        assertEquals(0, ch.images[0].paragraphIndex)
+        assertEquals("OEBPS/images/title.jpeg", ch.images[0].src)
+    }
+
+    /** M12 真机缺陷：epub3 裸 href 同样提取；内嵌 .svg（矢量）与空 href 不提取不崩（S6 契约不变） */
+    @Test
+    fun m12_bodySvgImage_hrefVariantsAndVectorFilter() = runBlocking {
+        val opf = """
+            |<?xml version="1.0" encoding="UTF-8"?>
+            |<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+            |<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+            |<manifest>
+            |<item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+            |</manifest>
+            |<spine><itemref idref="ch1"/></spine>
+            |</package>
+            |""".trimMargin()
+
+        // epub3 svg：无 xlink 命名空间的裸 href → 提取
+        val docHref = parser.parseBytes(
+            buildRawEpub(
+                opf = opf,
+                files = mapOf(
+                    "OEBPS/ch1.xhtml" to minimalChapter(
+                        """<svg xmlns="http://www.w3.org/2000/svg">""" +
+                            """<image href="images/p3.png" width="10" height="10"/></svg><p>甲。</p>"""
+                    ),
+                    "OEBPS/images/p3.png" to byteArrayOf(0x05)
+                )
+            ),
+            "body_svg_href.epub"
+        )
+        assertEquals("裸 href 也应提取", "OEBPS/images/p3.png", docHref.chapters[0].images.single().src)
+
+        // 内嵌 .svg（纯矢量引用）→ 不提取（渲染层不渲染 svg，S6/S9）
+        val docVector = parser.parseBytes(
+            buildRawEpub(
+                opf = opf,
+                files = mapOf(
+                    "OEBPS/ch1.xhtml" to minimalChapter(
+                        """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">""" +
+                            """<image xlink:href="images/v.svg"/></svg><p>乙。</p>"""
+                    )
+                )
+            ),
+            "body_svg_vector.epub"
+        )
+        assertTrue("内嵌矢量 svg 不提取", docVector.chapters[0].images.isEmpty())
+
+        // xlink:href 为空串 → 不提取、解析不崩
+        val docEmpty = parser.parseBytes(
+            buildRawEpub(
+                opf = opf,
+                files = mapOf(
+                    "OEBPS/ch1.xhtml" to minimalChapter(
+                        """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">""" +
+                            """<image xlink:href=""/></svg><p>丙。</p>"""
+                    )
+                )
+            ),
+            "body_svg_empty_href.epub"
+        )
+        assertTrue("空 href 不提取", docEmpty.chapters[0].images.isEmpty())
+        assertEquals(listOf("丙。"), docEmpty.chapters[0].paragraphs)
+    }
+
     /** broken_image.epub：缺失条目与截断位图都提取为 ParagraphImage（渲染层占位），正文文本完整 */
     @Test
     fun m11_brokenImage_stillParsedAndTextIntact() = runBlocking {

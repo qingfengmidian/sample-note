@@ -226,4 +226,122 @@ class ReaderViewModelWindowTest {
         assertTrue("loadMore 应追加段落", after > first)
         assertEquals(after, vm.uiState.value.totalItems)
     }
+
+    // ---- M12 热修（F4.7 空章跳过）：真机《邓小平文选》纯空章致打开白屏/断链 ----
+
+    /**
+     * 造一个 OEBPS 布局的最小多章 epub（章节体由调用方给定）：
+     * 空章 = body 内 `<p></p>`（flush 丢弃空白段 → paragraphs 空，与解析层契约一致）。
+     */
+    private fun buildWindowTestEpub(bodies: List<String>): ByteArray {
+        val container = """
+            <?xml version="1.0"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+            </container>
+        """.trimIndent()
+        // 逐行拼接（不走缩进 heredoc 内插）：$items/$spine 的续行会让 trimIndent 最小缩进归零，
+        // 导致 <?xml 声明前残留空格、解析报 Unexpected token（本类既有 VM 用例踩坑修正）
+        val opf = buildList {
+            add("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+            add("<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"id\">")
+            add("<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>t</dc:title></metadata>")
+            add("<manifest>")
+            bodies.indices.forEach { i ->
+                add("<item id=\"ch$i\" href=\"ch$i.xhtml\" media-type=\"application/xhtml+xml\"/>")
+            }
+            add("</manifest>")
+            add("<spine>")
+            bodies.indices.forEach { i -> add("<itemref idref=\"ch$i\"/>") }
+            add("</spine>")
+            add("</package>")
+        }.joinToString("\n")
+        val entries = linkedMapOf<String, ByteArray>(
+            "mimetype" to "application/epub+zip".toByteArray(),
+            "META-INF/container.xml" to container.toByteArray(),
+            "OEBPS/content.opf" to opf.toByteArray()
+        )
+        bodies.forEachIndexed { i, body ->
+            entries["OEBPS/ch$i.xhtml"] =
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>章$i</title></head><body>$body</body></html>"
+                    .toByteArray(Charsets.UTF_8)
+        }
+        val bytes = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(bytes).use { zip ->
+            entries.forEach { (name, content) ->
+                zip.putNextEntry(java.util.zip.ZipEntry(name))
+                zip.write(content)
+                zip.closeEntry()
+            }
+        }
+        return bytes.toByteArray()
+    }
+
+    /** 7. appendNextChapter 越过中间空章直达下一非空章（真机断链：物化空章 +0 item，snapshotFlow 不重发） */
+    @Test
+    fun appendNextChapter_skipsEmptyChapters() = runTest {
+        val epub = buildWindowTestEpub(
+            listOf("<p>第一章首段。</p>", "<p></p>", "<p>第三章首段。</p><p>第三章次段。</p>")
+        )
+        val vm = newViewModel(this, WindowFileOpener(epub))
+        vm.load("mem:///empty_mid.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+        val chapters = vm.uiState.value.document!!.chapters
+        assertEquals(3, chapters.size)
+        assertTrue("中间章应为纯空章", chapters[1].paragraphs.isEmpty())
+        assertEquals(1, vm.uiState.value.materializedChapterCount)
+
+        vm.appendNextChapter() // 第 2 章为空 → 直跳第 3 章
+        advanceUntilIdle()
+        assertEquals(3, vm.uiState.value.materializedChapterCount)
+
+        vm.appendNextChapter() // 已到末章，空操作
+        advanceUntilIdle()
+        assertEquals(3, vm.uiState.value.materializedChapterCount)
+    }
+
+    /** 8. 打开（无进度）落在纯空首章时前进到下一非空章，restoreItem 指向新章首（真机白屏修复） */
+    @Test
+    fun openWithLeadingEmptyChapter_advancesToFirstNonEmpty() = runTest {
+        val epub = buildWindowTestEpub(listOf("<p></p>", "<p>正文首段。</p>"))
+        val vm = newViewModel(this, WindowFileOpener(epub))
+        vm.load("mem:///empty_head.epub", DocFormat.EPUB)
+        awaitLoaded(vm)
+        val s = vm.uiState.value
+        assertNull(s.error)
+        assertEquals("应前进到第 2 章", 1, s.chapterIndex)
+        assertEquals(0, s.restoreParagraph)
+        assertEquals(2, s.materializedChapterCount)
+        val map = ChapterItemMap(s.document!!.chapters)
+        assertEquals(map.globalItem(1, 0), s.restoreItem)
+    }
+
+    /** 9. 空章边界：末章为空时 append clamp 书尾不越界；全空书 load/append 不崩（退化情形保持原章） */
+    @Test
+    fun emptyChapterEdge_tailEmptyAndAllEmpty_safe() = runTest {
+        // 末章为空：追加到书尾即停
+        val tailEpub = buildWindowTestEpub(listOf("<p>正文。</p>", "<p></p>"))
+        val vmTail = newViewModel(this, WindowFileOpener(tailEpub))
+        vmTail.load("mem:///empty_tail.epub", DocFormat.EPUB)
+        awaitLoaded(vmTail)
+        vmTail.appendNextChapter()
+        advanceUntilIdle()
+        assertEquals(2, vmTail.valueOfMaterialized())
+        vmTail.appendNextChapter()
+        advanceUntilIdle()
+        assertEquals(2, vmTail.valueOfMaterialized())
+
+        // 全空书：不崩、不越界、保持原章（无可渲染内容属退化情形）
+        val allEpub = buildWindowTestEpub(listOf("<p></p>", "<p></p>"))
+        val vmAll = newViewModel(this, WindowFileOpener(allEpub))
+        vmAll.load("mem:///empty_all.epub", DocFormat.EPUB)
+        awaitLoaded(vmAll)
+        assertEquals(0, vmAll.uiState.value.chapterIndex)
+        assertEquals(0, vmAll.uiState.value.totalItems)
+        vmAll.appendNextChapter()
+        advanceUntilIdle()
+        assertEquals(2, vmAll.valueOfMaterialized())
+    }
+
+    private fun ReaderViewModel.valueOfMaterialized(): Int = uiState.value.materializedChapterCount
 }
