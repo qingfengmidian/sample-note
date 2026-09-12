@@ -40,9 +40,13 @@
 
 - `isEmptyDoc` 改为「全章段落皆空白且无图」；多章书中单章为空不再误报「文件为空」（符合连续滚动预期），TC-F2-24 空文件用例仍绿。接受并记录为行为差异。
 
-### F5（未验证）设备端 TC-UI-12 未执行
+### F5（设备端测试已跑三轮，两处测试基建缺陷已修，剩 2 例待干净环境复跑）
 
-- 审查时 `adb devices` 为空（OPPO WiFi adb 不在线，`kill-server/start-server` 未恢复）。`ReaderWindowDeviceTest`（2 例）已写入 `androidTest`，**待真机/模拟器在线后补跑**；同时登记到 `docs/collab/pending-real-device-tests.md`。
+- **R1 夹具导航 helper 的 fling 过冲**（MdCss/MdImage/MdToc/ReaderWindowDeviceTest 共 4 处）：`swipeUp()` 触发 fling 跳过尾部夹具且只上滑不回退 → 尾部夹具（sample_*/styled）间歇性「夹具列表中未找到」。修复：改 `performScrollToNode(hasText(...))` 语义确定性滚动（与 M11b 对正文滚动的同款处理）。修复后 12 例中 10 例通过。
+- **R2 ReaderWindowDeviceTest 重名节点**：面板条目「封面页」与顶栏当前章标题同名 → `onNodeWithText` 命中 2 节点。修复：条目断言限定 `hasAnyAncestor(hasScrollAction())`（面板列表内）。
+- **R3 MdToc 两例时序脆弱**：面板滑入动画中 `assertIsDisplayed`（bounds 未稳定）、下拉菜单动画中点击「预览」落空、跳转后断言顶部源码段可见（已被滚动出视口，LazyColumn 缓冲区内节点「存在但未显示」）。修复：新增 `waitTextDisplayed`（等待存在且 displayed）、菜单项等待后再点、跳转后改断言跳转目标 `##### 标题五（H5）` 可见。
+- **剩余 2 例（MdTocDeviceTest.tocPanel/previewMode）在 R3 修复后仍失败，归因测试运行期间手机前台被切走**（用户正在使用设备，Activity 失焦后 Compose 暂停导致等待超时/不可见）——非产品缺陷（同场景手动操作：面板/预览/跳转均正常）。**待手机空闲时干净复跑确认**。
+- 过程中的环境发现：失败的 `connectedDebugAndroidTest` 会卸载应用（需重装 debug 包）；OPPO 对每次安装弹「安装完成」系统弹窗。
 
 ## 三、遗留清单（M12 收尾处理）
 

@@ -3,6 +3,7 @@ package com.sample.docreader
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -11,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -37,15 +39,17 @@ class MdTocDeviceTest {
     private fun openFixture(name: String) {
         composeTestRule.onNodeWithText("测试样本").performClick()
         composeTestRule.waitForIdle()
-        repeat(10) {
-            if (composeTestRule.onAllNodesWithText(name).fetchSemanticsNodes().isNotEmpty()) {
-                composeTestRule.onNodeWithText(name).performClick()
-                return
-            }
-            composeTestRule.onRoot().performTouchInput { swipeUp() }
-            composeTestRule.waitForIdle()
+        // M12 真机复盘：swipe fling 过冲会跳过尾部夹具，改 performScrollToNode 确定性滚动。
+        composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText(name))
+        composeTestRule.onNodeWithText(name).performClick()
+    }
+
+    /** 等待文本节点「可见」（存在且 displayed）——面板/下拉滑入动画期间节点已入树但 bounds 未稳定，
+     * 直接 assertIsDisplayed 会撞上「component is not displayed」（真机复盘 2026-09-12，MdToc 两例同根因）。 */
+    private fun waitTextDisplayed(text: String, timeoutMillis: Long = 5_000) {
+        composeTestRule.waitUntil(timeoutMillis) {
+            runCatching { composeTestRule.onNodeWithText(text).assertIsDisplayed() }.isSuccess
         }
-        throw AssertionError("夹具列表中未找到 $name")
     }
 
     private fun waitTextGone(text: String) {
@@ -64,10 +68,10 @@ class MdTocDeviceTest {
         }
         // 顶栏目录图标存在且可点
         composeTestRule.onNodeWithContentDescription("目录").assertIsDisplayed().performClick()
-        // 面板打开：无 # 前缀的标题行（仅面板持有该精确串）
-        composeTestRule.onNodeWithText("标题一（H1）").assertIsDisplayed()
-        composeTestRule.onNodeWithText("标题五（H5）").assertIsDisplayed()
-        composeTestRule.onNodeWithText("结尾标题（H2B）").assertIsDisplayed()
+        // 面板打开：无 # 前缀的标题行（仅面板持有该精确串）；等待滑入动画结束（bounds 稳定）
+        waitTextDisplayed("标题一（H1）")
+        waitTextDisplayed("标题五（H5）")
+        waitTextDisplayed("结尾标题（H2B）")
         // 点击「标题五（H5）」→ 面板关闭、回到源码正文
         composeTestRule.onNodeWithText("标题五（H5）").performClick()
         waitTextGone("标题五（H5）")
@@ -93,11 +97,10 @@ class MdTocDeviceTest {
         }
         // ⋮ 菜单 → 预览
         composeTestRule.onNodeWithContentDescription("菜单").performClick()
+        waitTextDisplayed("预览") // 下拉菜单滑入动画结束再点，否则点击落空（真机复盘 2026-09-12）
         composeTestRule.onNodeWithText("预览").performClick()
         // 预览渲染完成（标题无 # 前缀）
-        composeTestRule.waitUntil(timeoutMillis = 10_000) {
-            composeTestRule.onAllNodesWithText("标题一（H1）").fetchSemanticsNodes().isNotEmpty()
-        }
+        waitTextDisplayed("标题一（H1）", timeoutMillis = 10_000)
         // 预览下目录图标可用 → 面板打开 → 点击 H2 → 面板关闭。预览正文与面板行同名
         // （均无 # 前缀），用「文本 + click 动作」组合匹配器只命中面板行（正文块无 click 语义）。
         composeTestRule.onNodeWithContentDescription("目录").assertIsDisplayed().performClick()

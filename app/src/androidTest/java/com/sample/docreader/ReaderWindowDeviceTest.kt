@@ -3,6 +3,9 @@ package com.sample.docreader
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -10,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
@@ -35,15 +39,11 @@ class ReaderWindowDeviceTest {
     private fun openEpubFixture(name: String) {
         composeTestRule.onNodeWithText("测试样本").performClick()
         composeTestRule.waitForIdle()
-        repeat(12) {
-            if (composeTestRule.onAllNodesWithText(name).fetchSemanticsNodes().isNotEmpty()) {
-                composeTestRule.onNodeWithText(name).performClick()
-                return
-            }
-            composeTestRule.onRoot().performTouchInput { swipeUp() }
-            composeTestRule.waitForIdle()
-        }
-        throw AssertionError("夹具列表中未找到 $name")
+        // M12 真机复盘（2026-09-12）：swipeUp 的 fling 会过冲跳过目标条目且只上滑不回退，
+        // 尾部夹具（sample_*/styled）间歇性「未找到」；改 performScrollToNode 语义确定性滚动
+        // （与 M11b 对正文滚动的同款处理）。
+        composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText(name))
+        composeTestRule.onNodeWithText(name).performClick()
     }
 
     private fun waitForText(text: String) {
@@ -69,13 +69,15 @@ class ReaderWindowDeviceTest {
 
         composeTestRule.onNodeWithContentDescription("章节列表").assertIsDisplayed().performClick()
         composeTestRule.waitForIdle()
+        // 条目断言限定在面板列表内（hasAnyAncestor(hasScrollAction())）——顶栏当前章标题可能
+        // 与首个条目同名（「封面页」章即封面页条目），全树断言会命中 2 个节点（真机复盘 2026-09-12）。
         listOf("封面页", "第一节", "第二节", "未命中锚点", "中间锚点").forEach {
-            composeTestRule.onNodeWithText(it).assertIsDisplayed()
+            composeTestRule.onNode(hasText(it) and hasAnyAncestor(hasScrollAction())).assertIsDisplayed()
         }
         composeTestRule.onNodeWithText("第 4 章").assertDoesNotExist()
 
         // 点击锚点条目「第一节」（p1#sec1 → 段落 1）→ 面板关闭并定位到锚点段落
-        composeTestRule.onNodeWithText("第一节").performClick()
+        composeTestRule.onNode(hasText("第一节") and hasAnyAncestor(hasScrollAction())).performClick()
         composeTestRule.waitForIdle()
         waitForText("第一节锚点段。")
     }

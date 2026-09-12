@@ -2,6 +2,7 @@ package com.sample.docreader
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -39,15 +40,11 @@ class MdImageDeviceTest {
     private fun openEpubFixture(name: String) {
         composeTestRule.onNodeWithText("测试样本").performClick()
         composeTestRule.waitForIdle()
-        repeat(12) {
-            if (composeTestRule.onAllNodesWithText(name).fetchSemanticsNodes().isNotEmpty()) {
-                composeTestRule.onNodeWithText(name).performClick()
-                return
-            }
-            composeTestRule.onRoot().performTouchInput { swipeUp() }
-            composeTestRule.waitForIdle()
-        }
-        throw AssertionError("夹具列表中未找到 $name")
+        // M12 真机复盘（2026-09-12）：swipeUp 的 fling 会过冲跳过目标条目且只上滑不回退，
+        // 尾部夹具（sample_*/styled）间歇性「未找到」；改 performScrollToNode 语义确定性滚动
+        // （与 M11b 对正文滚动的同款处理）。
+        composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText(name))
+        composeTestRule.onNodeWithText(name).performClick()
     }
 
     private fun waitForContentDescription(desc: String) {
