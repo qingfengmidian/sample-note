@@ -125,12 +125,25 @@ class ReaderViewModel(
                 val (document, editable) = loadNonTxt(uri, name, format)
                 currentUri = uri
                 val restored = progressRepository?.progress(uri)?.first()
-                val chapterIndex = restored?.chapter
+                val rawChapter = restored?.chapter
                     ?.coerceIn(0, (document.chapters.size - 1).coerceAtLeast(0)) ?: 0
-                // paragraph 同样需 clamp 到目标章节范围内，防止恢复越界（章节空时归 0）
+                // M12 热修（F4.7）：恢复/起始章为空章且全书存在非空章 → 前进到**其后第一个非空章**
+                // （空章无 item，落上去即白屏且滑动无效）；全空书/其后无非空章则保持原章不越界。
+                val chapterIndex = if (document.chapters.getOrNull(rawChapter)?.paragraphs?.isEmpty() == true) {
+                    (rawChapter + 1 until document.chapters.size)
+                        .firstOrNull { document.chapters[it].paragraphs.isNotEmpty() } ?: rawChapter
+                } else {
+                    rawChapter
+                }
+                // paragraph 同样需 clamp 到目标章节范围内，防止恢复越界（章节空时归 0）；
+                // 发生空章前进时归零（不回填原章段落号，restoreItem 同步指向新章首）
                 val maxParagraph =
                     (document.chapters.getOrNull(chapterIndex)?.paragraphs?.lastIndex ?: 0).coerceAtLeast(0)
-                currentParagraph = restored?.paragraph?.coerceIn(0, maxParagraph) ?: 0
+                currentParagraph = if (chapterIndex != rawChapter) {
+                    0
+                } else {
+                    restored?.paragraph?.coerceIn(0, maxParagraph) ?: 0
+                }
                 val map = ChapterItemMap(document.chapters)
                 itemMap = map
                 _uiState.update {
@@ -332,11 +345,19 @@ class ReaderViewModel(
     /**
      * 连续滚动触底追加下一章（章级渐进物化）。已到末章时为空操作（末章停止）。
      * 只增不减：已读章不回收（决策日志 D-2026-09-11-03，索引稳定优先）。
+     *
+     * M12 热修（F4.7）：追加时**越过连续空章**——空章宽度为 0（与 [ChapterItemMap] 契约一致），
+     * 若只物化空章则 item 列表不变、snapshotFlow 不重发，连续滚动卡在上一章尾部（真机断链）。
+     * 从已物化边界向前扫描跳过 `paragraphs.isEmpty()` 的章，直达下一非空章（物化到其含）或书尾。
      */
     fun appendNextChapter() {
-        val total = _uiState.value.document?.chapters?.size ?: return
+        val chapters = _uiState.value.document?.chapters ?: return
+        val total = chapters.size
         _uiState.update {
-            it.copy(materializedChapterCount = (it.materializedChapterCount + 1).coerceAtMost(total))
+            var next = it.materializedChapterCount
+            while (next < total && chapters[next].paragraphs.isEmpty()) next++
+            val target = if (next < total) next + 1 else total
+            it.copy(materializedChapterCount = maxOf(it.materializedChapterCount, target.coerceAtMost(total)))
         }
     }
 

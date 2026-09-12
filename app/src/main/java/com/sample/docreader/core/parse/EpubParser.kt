@@ -756,6 +756,21 @@ class EpubParser : DocumentParser {
         return ParagraphImage(paragraphIndex = 0, src = rasterSrc, isCover = true)
     }
 
+    /**
+     * 读取 svg `<image>` 的引用 href（M12 热修）：xlink 命名空间优先，裸 `href` 次之（epub3）。
+     * 注意工厂 `isNamespaceAware = false`（见 companion），xlink 属性在事件中表现为字面 `xlink:href`，
+     * 故先按命名空间取（兼容感知开启场景），再按字面属性名兜底，最后取无命名空间裸 href。
+     */
+    private fun svgImageHref(parser: XmlPullParser): String? {
+        parser.getAttributeValue("http://www.w3.org/1999/xlink", "href")?.let { return it }
+        for (i in 0 until parser.attributeCount) {
+            if (parser.getAttributeName(i).equals("xlink:href", ignoreCase = true)) {
+                return parser.getAttributeValue(i)
+            }
+        }
+        return parser.getAttributeValue(null, "href")
+    }
+
     /** 解析 svg 内 `<image href/xlink:href>` 引用的位图路径；取不到返回 null（纯矢量或解析失败） */
     private fun innerRasterHref(bytes: ByteArray): String? = runCatching {
         val parser = newPullParser()
@@ -969,6 +984,22 @@ class EpubParser : DocumentParser {
                                 images += ParagraphImage(paragraphIndex = owner, src = canonical, alt = alt)
                             }
                         }
+                        tag == "image" -> {
+                            // F2.14 扩展（M12 热修）：正文 svg 内嵌位图按 img 同规则提取——
+                            // 扫描版扉页/版权页常以 <svg><image xlink:href> 整页内嵌，不提取则解析为空章致白屏/断链。
+                            // <image> 无 alt（恒 null）、非封面（封面走 resolveCover）；.svg 矢量引用不提取（S6/S9）；
+                            // 空/空白 href 跳过；owner 归属与 img 完全一致。本分支不压样式帧（见 END_TAG 跳过名单）。
+                            val href = svgImageHref(parser)?.trim().orEmpty()
+                            if (href.isNotEmpty() && !href.endsWith(".svg", true)) {
+                                val canonical = resolveHref(chapterDir, href)
+                                val owner = if (sb.isNotBlank()) {
+                                    paragraphs.size
+                                } else {
+                                    (paragraphs.size - 1).coerceAtLeast(0)
+                                }
+                                images += ParagraphImage(paragraphIndex = owner, src = canonical, alt = null)
+                            }
+                        }
                         tag == "br" || tag == "hr" -> flush()
                         tag in voidTags -> {} // meta/link/input 等：无内容无样式帧
                         else -> {
@@ -994,7 +1025,9 @@ class EpubParser : DocumentParser {
                         headDepth > 0 -> {} // head 内其余结束标签忽略（未压帧，勿 pop）
                         skipDepth > 0 -> if (tag == skipTag) skipDepth--
                         tag == "style" -> {} // 非 head 的 style 在 collectingStyle 分支已处理，此处防御
-                        tag == "img" || tag in voidTags -> {} // 无帧可 pop（XHTML 显式闭合 img 等）
+                        // F2.14（M12 热修）：<image/> 自闭合 kxml2 报 START+END 两事件，START 不压帧，END 必须跳过，
+                        // 否则会把外层 <svg> 的样式帧 pop 坏（img 同理，无帧可 pop）
+                        tag == "img" || tag == "image" || tag in voidTags -> {}
                         else -> {
                             if (tag !in inlineTags) flush() // 块级结束：收尾本块余下文本（归属本块样式）
                             val frame = frames.removeLastOrNull() // 与 pushFrameFor 对称
