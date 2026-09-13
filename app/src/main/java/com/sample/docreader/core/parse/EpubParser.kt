@@ -363,7 +363,8 @@ internal data class ExtractedChapter(
     val paragraphs: List<String>,
     val images: List<ParagraphImage>,
     val styles: Map<Int, ParagraphStyleHints> = emptyMap(),
-    val anchors: Map<String, Int> = emptyMap()
+    val anchors: Map<String, Int> = emptyMap(),
+    val headingLevels: List<Int?> = emptyList() // F2.17：与 paragraphs 等长、按段落索引对齐；1~6 = h1~h6，null = 非标题
 )
 
 /**
@@ -447,11 +448,10 @@ class EpubParser : DocumentParser {
             }
             // M3（评审）：整章纯图（扉页/图版章）无文本段落时合成一条空字符串宿主段落承载图片，
             // 否则 LazyColumn 无 item 可挂图片（空宿主段落 index 0 与 standalone 图 owner 对齐）。
-            val paragraphs = if (extracted.paragraphs.isEmpty() && extracted.images.isNotEmpty()) {
-                listOf("")
-            } else {
-                extracted.paragraphs
-            }
+            val synthesizedHost = extracted.paragraphs.isEmpty() && extracted.images.isNotEmpty()
+            val paragraphs = if (synthesizedHost) listOf("") else extracted.paragraphs
+            // F2.17：纯图章合成宿主段无标签信息 → 层级 null；否则沿用抽取结果（与 paragraphs 等长）
+            val headingLevels = if (synthesizedHost) listOf(null) else extracted.headingLevels
             anchorsByChapter += extracted.anchors
             val tocEntry = titleByPath[path]
             chapters += Chapter(
@@ -459,7 +459,8 @@ class EpubParser : DocumentParser {
                 paragraphs = paragraphs,
                 level = tocEntry?.level ?: 1,
                 images = extracted.images,
-                styles = extracted.styles
+                styles = extracted.styles,
+                headingLevels = headingLevels
             )
         }
         // F2.14 封面：OPF meta name="cover" 或 manifest properties="cover-image" → isCover 挂首章段落 0
@@ -529,12 +530,29 @@ class EpubParser : DocumentParser {
         try {
             extractWithPull2(bytes, "UTF-8", chapterDir, cancelCheck)
         } catch (e2: XmlPullParserException) {
-            ExtractedChapter(stripTagsFallback2(bytes), emptyList())
+            fallbackExtracted(bytes)
         } catch (io: IOException) {
-            ExtractedChapter(stripTagsFallback2(bytes), emptyList())
+            fallbackExtracted(bytes)
         }
     } catch (io: IOException) {
-        ExtractedChapter(stripTagsFallback2(bytes), emptyList())
+        fallbackExtracted(bytes)
+    }
+
+    /** 降级路径（剥标签正则）无标签结构 → 层级全 null，与 paragraphs 等长（F2.17） */
+    private fun fallbackExtracted(bytes: ByteArray): ExtractedChapter {
+        val paragraphs = stripTagsFallback2(bytes)
+        return ExtractedChapter(paragraphs, emptyList(), headingLevels = List(paragraphs.size) { null })
+    }
+
+    /** F2.17：段落所属块级标签 → 标题层级（h1~h6 → 1~6，其余含 null → null） */
+    private fun headingLevelOf(tag: String?): Int? = when (tag) {
+        "h1" -> 1
+        "h2" -> 2
+        "h3" -> 3
+        "h4" -> 4
+        "h5" -> 5
+        "h6" -> 6
+        else -> null
     }
 
     /** 章节正文抽取（既有测试用纯文本契约）；图片提取统一走 [extractChapterFrom] */
@@ -898,6 +916,7 @@ class EpubParser : DocumentParser {
         val images = mutableListOf<ParagraphImage>()
         val styles = mutableMapOf<Int, ParagraphStyleHints>()
         val anchors = LinkedHashMap<String, Int>() // F2.16：元素 id / <a name> → 段落索引
+        val headingLevels = mutableListOf<Int?>() // F2.17：与 paragraphs 并行，按 flush 顺序追加
         val cssRules = mutableListOf<CssRule>() // 本章已收集的 <style> 规则（head 先行 → body 全量命中）
         val frames = ArrayDeque<StyleFrame>()   // 开标签样式帧栈
         val sb = StringBuilder()
@@ -925,7 +944,9 @@ class EpubParser : DocumentParser {
             if (s.isEmpty()) return
             val idx = paragraphs.size
             paragraphs += s
-            hintsOf(ownerFrame())?.let { styles[idx] = it }
+            val owner = ownerFrame()
+            hintsOf(owner)?.let { styles[idx] = it }
+            headingLevels += headingLevelOf(owner?.tag) // F2.17：标题层级纯增量，与 styles 解耦
             // F2.16 锚点映射：段级 flush 时记录祖先元素 id / <a name> → 该段落。
             // 遍历全部祖先：容器 id 因此映射到"其内首个段落"（putIfAbsent 保证首个命中不被后续覆盖）。
             for (i in frames.indices.reversed()) {
@@ -1051,7 +1072,7 @@ class EpubParser : DocumentParser {
             event = parser.next()
         }
         flush()
-        return ExtractedChapter(paragraphs, images, styles, anchors)
+        return ExtractedChapter(paragraphs, images, styles, anchors, headingLevels)
     }
 
     /** 剥标签正则降级：仅在 XmlPullParserException/IOException 时触发；head 一并剥除（同正文抽取契约）。无图信息，图片为空。 */

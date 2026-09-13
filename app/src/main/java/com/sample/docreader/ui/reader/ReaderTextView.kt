@@ -105,9 +105,17 @@ internal fun clampStyleEm(value: Float): Float = value.coerceIn(0.5f, 3.0f)
 
 /**
  * F2.17（M15）默认标题层级倍率：H1 1.6 / H2 1.45 / H3 1.3 / H4 1.2 / H5 1.1 / H6 1.05；
- * 非标题（level 越界）→ 1f。**契约桩**：红测试先行钉死期望值，M15b 实施（设计 §3.3「标题层级默认」）。
+ * 非标题（level 越界）→ 1f（设计 §3.3「标题层级默认」）。
  */
-internal fun headingFontScale(level: Int): Float = 1f
+internal fun headingFontScale(level: Int): Float = when (level) {
+    1 -> 1.6f
+    2 -> 1.45f
+    3 -> 1.3f
+    4 -> 1.2f
+    5 -> 1.1f
+    6 -> 1.05f
+    else -> 1f
+}
 
 /** WCAG 相对亮度（评审附录）：sRGB 通道线性化后加权和 */
 private fun channelLuminance(c: Int): Double {
@@ -143,9 +151,10 @@ private fun scaleTextUnit(v: TextUnit, ratio: Float): TextUnit =
  * - fontSizeEm/lineHeightEm clamp 0.5~3.0 后乘全局值；仅字号变化时行距随字号等比缩放以保持全局行距比例；
  * - bold/italic/textAlign 直接采用（null 不动）；
  * - colorArgb 与主题背景对比度 < 4.5:1 回退主题前景色；
- * - hints == null → 原样（styles 空/无样式 epub 路径零改动）；
- * - F2.17（M15）[headingLevel] **契约桩**：当前忽略该参数（红测试先行），M15b 接入默认标题层级
- *   （书 CSS 已声明字号则覆盖默认倍率、未声明则用 [headingFontScale]，bold 三态 null → 默认加粗）。
+ * - hints == null 且非标题 → 原样（styles 空/无样式 epub 路径零改动）；
+ * - F2.17（M15）[headingLevel]：标题段书 CSS 已声明字号则**覆盖**默认倍率（不相乘）、未声明则用
+ *   [headingFontScale]；行距随字号等比；bold 三态 null/true → 默认加粗、false → 非粗；
+ *   非标题段（headingLevel == null）行为与 M15 前逐位一致。
  */
 internal fun applyParagraphHints(
     base: TextStyle,
@@ -153,22 +162,30 @@ internal fun applyParagraphHints(
     theme: ReadingTheme,
     headingLevel: Int? = null
 ): TextStyle {
-    if (hints == null) return base
+    if (hints == null && headingLevel == null) return base
     val bgArgb = theme.background.toArgb()
-    val fontSizeRatio = hints.fontSizeEm?.let { clampStyleEm(it) }
-    val lineHeightRatio = hints.lineHeightEm?.let { clampStyleEm(it) }
+    val fontSizeRatio = hints?.fontSizeEm?.let { clampStyleEm(it) }
+    val lineHeightRatio = hints?.lineHeightEm?.let { clampStyleEm(it) }
+    // 标题默认层级倍率仅在书未声明 font-size 时参与；声明了则覆盖（不相乘）
+    val headingRatio = if (fontSizeRatio == null && headingLevel != null) headingFontScale(headingLevel) else null
+    val effectiveFontRatio = fontSizeRatio ?: headingRatio
     var ts = base
-    val fontSize = if (fontSizeRatio != null) scaleTextUnit(base.fontSize, fontSizeRatio) else base.fontSize
+    val fontSize = if (effectiveFontRatio != null) scaleTextUnit(base.fontSize, effectiveFontRatio) else base.fontSize
     val lineHeight = when {
         lineHeightRatio != null -> scaleTextUnit(base.lineHeight, lineHeightRatio)
-        fontSizeRatio != null -> scaleTextUnit(base.lineHeight, fontSizeRatio)
+        effectiveFontRatio != null -> scaleTextUnit(base.lineHeight, effectiveFontRatio)
         else -> base.lineHeight
     }
     ts = ts.copy(fontSize = fontSize, lineHeight = lineHeight)
-    hints.bold?.let { ts = ts.copy(fontWeight = if (it) FontWeight.Bold else FontWeight.Normal) }
-    hints.italic?.let { ts = ts.copy(fontStyle = if (it) FontStyle.Italic else FontStyle.Normal) }
-    hints.textAlign?.let { ts = ts.copy(textAlign = when (it) { 0 -> TextAlign.Left; 1 -> TextAlign.Center; else -> TextAlign.Right }) }
-    hints.colorArgb?.let { cssArgb ->
+    if (headingLevel != null) {
+        // 标题默认加粗；hints.bold 三态：null/true → 加粗，false → 非粗（遵循书）
+        ts = ts.copy(fontWeight = if (hints?.bold == false) FontWeight.Normal else FontWeight.Bold)
+    } else {
+        hints?.bold?.let { ts = ts.copy(fontWeight = if (it) FontWeight.Bold else FontWeight.Normal) }
+    }
+    hints?.italic?.let { ts = ts.copy(fontStyle = if (it) FontStyle.Italic else FontStyle.Normal) }
+    hints?.textAlign?.let { ts = ts.copy(textAlign = when (it) { 0 -> TextAlign.Left; 1 -> TextAlign.Center; else -> TextAlign.Right }) }
+    hints?.colorArgb?.let { cssArgb ->
         if (keepCssColor(cssArgb, bgArgb)) ts = ts.copy(color = argbToColor(cssArgb))
     }
     return ts
@@ -221,7 +238,7 @@ fun ReaderTextView(
                 val below = item.images.filter { !it.isCover }      // 正文图：该段文字下方
                 // F2.15：本段样式合并 + 0/非 0 两档段距（非 0 段距加大 item 垂直内边距）
                 val hints = item.styles
-                val paragraphStyle = applyParagraphHints(textStyle, hints, theme)
+                val paragraphStyle = applyParagraphHints(textStyle, hints, theme, item.headingLevel)
                 val itemVerticalPad = if (hints?.paragraphSpacing == true) 8.dp else 4.dp
                 Column(modifier = Modifier.fillMaxWidth()) {
                     covers.forEach {

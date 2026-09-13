@@ -16,7 +16,7 @@ data class ReaderItem(
     val images: List<ParagraphImage>,
     val styles: ParagraphStyleHints?,
     val isChapterFirst: Boolean, // 章首项（M12c 章间分隔/标题语义用）
-    /** F2.17（M15）标题层级：1~6 = h1~h6，null = 非标题（**契约桩**：M15b 由组装层填充） */
+    /** F2.17（M15）标题层级：1~6 = h1~h6，null = 非标题（由组装层从 Chapter.headingLevels 填充） */
     val headingLevel: Int? = null
 )
 
@@ -45,7 +45,8 @@ fun assembleReaderItems(chapters: List<Chapter>, materializedCount: Int): List<R
                 text = text,
                 images = imagesByParagraph[paragraphIndex].orEmpty(),
                 styles = chapter.styles[paragraphIndex],
-                isChapterFirst = paragraphIndex == 0
+                isChapterFirst = paragraphIndex == 0,
+                headingLevel = chapter.headingLevels.getOrNull(paragraphIndex)
             )
         }
     }
