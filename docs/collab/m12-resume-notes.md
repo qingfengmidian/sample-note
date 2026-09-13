@@ -1,8 +1,8 @@
 # M12 收口记录（原续接笔记）
 
-日期：2026-09-13　状态：**代码 + 真机验收全部完成，仅剩提交/打 tag（待用户批准）与 D11 体感终审**
+日期：2026-09-13　状态：**M12 全部收口（代码 + 真机验收 + D11 体感终审 + 提交 + `m12` tag 完成）**
 
-验收详情见 `docs/collab/reviews/m12-acceptance.md`。
+验收详情见 `docs/collab/reviews/m12-acceptance.md`。下一步：M13（弹层强调色与阅读主题解耦，设计见 `docs/开发计划.md`）。
 
 ## 一、本轮完成（2026-09-13 真机验收）
 
@@ -11,19 +11,16 @@
   1. 位置依赖 → 新增 `openFixtureAtTop()` 有界滑回顶部锚点（进度按 uri 落库恢复致首段不在语义树）；
   2. 几何依赖 + 精确串 → 结尾改断言跳转目标 `"##### 标题五（H5）"`（源码段保留全部 # 前缀）。
   09-12 的「用户用手机致失焦」归因不成立。
-- **D9** 真机通过（ReaderWindowDeviceTest.anchorToc 首过；进度条顺延）；**D10** 《邓小平文选》四项全过（目录原样/跳转/出版说明顶栏留空/书名页非白屏）；**D11** many_chapters 120 章连续滚动通过（PSS +6.5MB、无 ANR；体感待用户终审）；**D5** Magnifica md 切换/深跳/杀进程重开全过。
+- **D9** 真机通过（ReaderWindowDeviceTest.anchorToc 首过；进度条顺延）；**D10** 《邓小平文选》四项全过（目录原样/跳转/出版说明顶栏留空/书名页非白屏）；**D11** many_chapters 120 章连续滚动通过（PSS +6.5MB、无 ANR、**滑动手感用户终审通过**）；**D5** Magnifica md 切换/深跳/杀进程重开全过。
 - **真实书附加走查**：Flatland.epub（665KB，Calibre 真 CSS+字体+插图+嵌套 NCX）打开/目录/插图/CSS/跨章滚动全过，PSS 123.6MB 无膨胀。
-- 文档回写：`pending-real-device-tests.md` D5/D9/D10/D11 勾选 + 表头状态；本文件。
+- **提交与打 tag**：`c227243`（测试修复）+ `1a6f274`（验收文档）+ tag `m12`。
+- 文档回写：`pending-real-device-tests.md` D5/D9/D10/D11 勾选 + 表头状态；本文件；`AGENTS.md`。
 
-## 二、待办
+## 二、后续（M12 已收口，无遗留待办）
 
-1. **用户终审**：D11 连续滚动流畅度体感（自动化只能证明无卡死/无 OOM/位置正确）。
-2. **提交本轮变更**（需用户批准）：
-   - `app/src/androidTest/java/com/sample/docreader/MdTocDeviceTest.kt`（测试位置无关化 + 精确串）
-   - `docs/collab/reviews/m12-acceptance.md`（新增）
-   - `docs/collab/pending-real-device-tests.md`、`docs/collab/m12-resume-notes.md`（回写）
-   - `AGENTS.md`（M12 真机验收完成状态）
-3. **打 `m12` tag**（里程碑 tag 惯例，主仓库）。
+1. **M13**：弹层强调色与阅读主题解耦（`docs/开发计划.md` M13）。
+2. **M14**：中英双语 F4.6（需求 REV7）。
+3. 恢复 F4.8 进度条时：移除 `@Ignore` 并复验 D9/D11 的进度条拖动项（组件与用例已保留）。
 
 ## 三、环境备忘
 
