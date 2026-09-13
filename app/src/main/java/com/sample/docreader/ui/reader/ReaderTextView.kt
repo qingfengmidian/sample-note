@@ -103,6 +103,12 @@ internal fun lineHeightSp(settings: ReadingSettings) =
 /** CSS 相对倍率 clamp 0.5~3.0（设计 §3.3/F2.15） */
 internal fun clampStyleEm(value: Float): Float = value.coerceIn(0.5f, 3.0f)
 
+/**
+ * F2.17（M15）默认标题层级倍率：H1 1.6 / H2 1.45 / H3 1.3 / H4 1.2 / H5 1.1 / H6 1.05；
+ * 非标题（level 越界）→ 1f。**契约桩**：红测试先行钉死期望值，M15b 实施（设计 §3.3「标题层级默认」）。
+ */
+internal fun headingFontScale(level: Int): Float = 1f
+
 /** WCAG 相对亮度（评审附录）：sRGB 通道线性化后加权和 */
 private fun channelLuminance(c: Int): Double {
     val v = c / 255.0
@@ -137,12 +143,15 @@ private fun scaleTextUnit(v: TextUnit, ratio: Float): TextUnit =
  * - fontSizeEm/lineHeightEm clamp 0.5~3.0 后乘全局值；仅字号变化时行距随字号等比缩放以保持全局行距比例；
  * - bold/italic/textAlign 直接采用（null 不动）；
  * - colorArgb 与主题背景对比度 < 4.5:1 回退主题前景色；
- * - hints == null → 原样（styles 空/无样式 epub 路径零改动）。
+ * - hints == null → 原样（styles 空/无样式 epub 路径零改动）；
+ * - F2.17（M15）[headingLevel] **契约桩**：当前忽略该参数（红测试先行），M15b 接入默认标题层级
+ *   （书 CSS 已声明字号则覆盖默认倍率、未声明则用 [headingFontScale]，bold 三态 null → 默认加粗）。
  */
 internal fun applyParagraphHints(
     base: TextStyle,
     hints: ParagraphStyleHints?,
-    theme: ReadingTheme
+    theme: ReadingTheme,
+    headingLevel: Int? = null
 ): TextStyle {
     if (hints == null) return base
     val bgArgb = theme.background.toArgb()

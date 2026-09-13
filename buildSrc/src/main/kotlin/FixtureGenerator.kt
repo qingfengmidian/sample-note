@@ -531,6 +531,49 @@ object FixtureGenerator {
                 """.trimIndent())
                 put("toc.ncx", ncx(listOf("坏样式章" to "ch1.xhtml")))
             })
+
+        // 3) headings.epub（TC-F2-28/29，F2.17/M15）：章 1 无任何样式声明（h1~h6 各一段 + 正文段）
+        //    → 全部走阅读器默认标题层级；章 2 混合（h1/h4 无声明、h2 声明 font-size+font-weight:normal、
+        //    h3 声明 font-size:2em）→ 验证「书 CSS 覆盖而非叠加」与 bold 三态。
+        //    期望（与解析层/合并单测严格对齐）：
+        //    章 1 headingLevels = [1, null, 2, null, 3, 4, 5, 6, null]，styles 全空；
+        //    章 2 headingLevels = [1, 2, 3, 4, null]，styles[1] = {fontSizeEm 1.1, bold false}、
+        //    styles[2] = {fontSizeEm 2.0}（bold 未声明 → 走默认加粗）。
+        epub(dir, "headings.epub",
+            opf(listOf("ch1.xhtml" to "", "ch2.xhtml" to ""), ncx = true, nav = false),
+            buildMap {
+                put("ch1.xhtml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <html xmlns="http://www.w3.org/1999/xhtml"><head><title>默认标题层级章</title></head>
+                    <body>
+                    <h1>一级标题</h1>
+                    <p>一级标题后正文一。</p>
+                    <h2>二级标题</h2>
+                    <p>二级标题后正文二。</p>
+                    <h3>三级标题</h3>
+                    <h4>四级标题</h4>
+                    <h5>五级标题</h5>
+                    <h6>六级标题</h6>
+                    <p>正文段落无样式。</p>
+                    </body></html>
+                """.trimIndent())
+                put("ch2.xhtml", """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <html xmlns="http://www.w3.org/1999/xhtml"><head><title>覆盖章</title>
+                    <style type="text/css">
+                    h2 { font-size: 1.1em; font-weight: normal; }
+                    h3 { font-size: 2em; }
+                    </style></head>
+                    <body>
+                    <h1>覆盖章一级标题</h1>
+                    <h2>覆盖章二级标题</h2>
+                    <h3>覆盖章三级标题</h3>
+                    <h4>覆盖章四级标题</h4>
+                    <p>覆盖章正文。</p>
+                    </body></html>
+                """.trimIndent())
+                put("toc.ncx", ncx(listOf("默认标题层级章" to "ch1.xhtml", "覆盖章" to "ch2.xhtml")))
+            })
     }
 
     private fun xhtml(title: String, body: String, encoding: String = "UTF-8") = """
@@ -703,7 +746,7 @@ object FixtureGenerator {
             "nested_toc.epub", "mixed_encoding.epub", "bad_decl.epub", "broken.epub", "no_nav.epub",
             "malformed.epub", "nested_nav.epub", "bad_spine.epub",
             "sample_images.epub", "sample_cover.epub", "broken_image.epub",
-            "styled.epub", "bad_css.epub", "anchor_toc.epub")
+            "styled.epub", "bad_css.epub", "anchor_toc.epub", "headings.epub")
             .forEach { name ->
                 val e = entries(name)
                 check(e["mimetype"]?.toString(Charsets.US_ASCII) == "application/epub+zip",
@@ -814,6 +857,23 @@ object FixtureGenerator {
             "bad_css.epub 第 1 章应含非法语法（???/@media 段）与合法子集规则")
         check(badCssCh1.contains("正文第一段可读。"),
             "bad_css.epub 第 1 章正文应完整")
+
+        // M15（F2.17/TC-UT-17）：headings.epub 结构自检——章 1 六种标题且**无任何字号声明**（默认层级前提），
+        // 章 2 含 h2/h3 样式声明（覆盖语义）且 h1/h4 无声明
+        val headingsCh1 = entries("headings.epub")["OEBPS/ch1.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check((1..6).all { headingsCh1.contains("<h$it>") },
+            "headings.epub 第 1 章应含 h1~h6 各一段")
+        check(headingsCh1.contains("正文段落无样式。") && !headingsCh1.contains("<style") &&
+            !headingsCh1.contains("font-size"),
+            "headings.epub 第 1 章应无任何样式/字号声明（默认层级走查前提）")
+        val headingsCh2 = entries("headings.epub")["OEBPS/ch2.xhtml"]?.toString(Charsets.UTF_8) ?: ""
+        check(headingsCh2.contains("h2 { font-size: 1.1em; font-weight: normal; }") &&
+            headingsCh2.contains("h3 { font-size: 2em; }"),
+            "headings.epub 第 2 章应含 h2/h3 字号声明")
+        check((1..4).all { headingsCh2.contains("<h$it>") },
+            "headings.epub 第 2 章应含 h1~h4 各一段（h1/h4 无声明）")
+        check(entries("headings.epub").containsKey("OEBPS/toc.ncx"),
+            "headings.epub 应含 NCX 目录")
 
         // M12 新增（F2.16/TC-UT-14/15）：anchor_toc.epub 结构自检——navPoint 数量/嵌套层级/fragment/锚点 id/未编入章节
         val anchorEntries = entries("anchor_toc.epub")

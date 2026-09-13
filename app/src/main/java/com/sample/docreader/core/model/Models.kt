@@ -22,8 +22,11 @@ data class Chapter(
     val level: Int = 1,          // 章节层级（1 起）：epub 目录嵌套用于章节列表缩进，单章格式恒为 1
     val images: List<ParagraphImage> = emptyList(), // F2.14 段落内图片（仅 epub 非空）：挂所属段落 item 内渲染，
                                                     // 不新增 LazyColumn 项——段落索引稳定（评审 S8）
-    val styles: Map<Int, ParagraphStyleHints> = emptyMap() // F2.15 CSS 样式提示（仅 epub 非空；默认空表零影响）：
+    val styles: Map<Int, ParagraphStyleHints> = emptyMap(), // F2.15 CSS 样式提示（仅 epub 非空；默认空表零影响）：
                                                            // 段落索引 → 相对样式，LazyColumn item 索引 == 段落索引恒成立
+    val headingLevels: List<Int?> = emptyList() // F2.17 标题层级（仅 epub 非空）：与 paragraphs 等长、
+                                                // 1~6 = h1~h6，null = 非标题。与 styles **解耦**——
+                                                // 标题段无任何 CSS 命中（styles 无该索引）时渲染层仍能取到层级走默认标题样式
 )
 
 /**

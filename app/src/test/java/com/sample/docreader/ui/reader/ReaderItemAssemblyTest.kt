@@ -102,4 +102,23 @@ class ReaderItemAssemblyTest {
 
     private fun image(paragraphIndex: Int, src: String, isCover: Boolean = false) =
         ParagraphImage(paragraphIndex = paragraphIndex, src = src, alt = null, isCover = isCover)
+
+    /** F2.17（M15/TC-UT-18）：标题层级随组装透传——与 styles 解耦（h 段可无 styles 但仍有层级）；
+     *  缺省 headingLevels 空表 → 全 null（txt/md/xml 与既有构造零改动） */
+    @Test
+    fun carriesHeadingLevelFromChapter() {
+        val chapters = listOf(
+            Chapter(
+                title = "T",
+                paragraphs = listOf("一级标题", "正文", "二级标题"),
+                headingLevels = listOf(1, null, 2)
+            )
+        )
+        val items = assembleReaderItems(chapters, materializedCount = 1)
+        assertEquals(listOf(1, null, 2), items.map { it.headingLevel })
+        assertEquals("层级与样式解耦：无 CSS 命中时 styles 全 null", listOf(null, null, null), items.map { it.styles })
+
+        val plain = assembleReaderItems(listOf(chapter("P", "p0")), materializedCount = 1)
+        assertNull("缺省 headingLevels → 层级 null", plain.single().headingLevel)
+    }
 }

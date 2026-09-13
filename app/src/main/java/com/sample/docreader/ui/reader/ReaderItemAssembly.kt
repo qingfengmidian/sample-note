@@ -15,7 +15,9 @@ data class ReaderItem(
     val text: String,
     val images: List<ParagraphImage>,
     val styles: ParagraphStyleHints?,
-    val isChapterFirst: Boolean // 章首项（M12c 章间分隔/标题语义用）
+    val isChapterFirst: Boolean, // 章首项（M12c 章间分隔/标题语义用）
+    /** F2.17（M15）标题层级：1~6 = h1~h6，null = 非标题（**契约桩**：M15b 由组装层填充） */
+    val headingLevel: Int? = null
 )
 
 /**

@@ -737,4 +737,35 @@ class EpubParserTest {
         }
         return bytes.toByteArray()
     }
+
+    /**
+     * TC-UT-17（F2.17/M15）：标题层级提取——`headings.epub` 章 1 六种标题 + 正文段（无任何样式声明）、
+     * 章 2 混合（h2/h3 有 CSS 声明、h1/h4 无）；层级与 paragraphs 等长、与 styles 解耦；
+     * 无标题章全 null（styled.epub 第 2 章纯文本）不回归。
+     */
+    @Test
+    fun tcUt17_headingLevels() = runBlocking {
+        val doc = parser.parseBytes(Fixtures.bytes("headings.epub"), "headings.epub")
+        val ch1 = doc.chapters[0]
+        assertEquals(
+            "h1~h6 依次记 1~6、p 段 null（章 1 无样式声明）",
+            listOf(1, null, 2, null, 3, 4, 5, 6, null),
+            ch1.headingLevels
+        )
+        assertEquals("headingLevels 必须与 paragraphs 等长", ch1.paragraphs.size, ch1.headingLevels.size)
+        assertTrue("章 1 无 CSS 命中 → styles 空（层级与样式解耦）", ch1.styles.isEmpty())
+
+        val ch2 = doc.chapters[1]
+        assertEquals("CSS 命中与否都照记层级", listOf(1, 2, 3, 4, null), ch2.headingLevels)
+        assertEquals(1.1f, ch2.styles.getValue(1).fontSizeEm!!, 1e-4f)
+        assertEquals(false, ch2.styles.getValue(1).bold)
+        assertEquals(2f, ch2.styles.getValue(2).fontSizeEm!!, 1e-4f)
+
+        val styled = parser.parseBytes(Fixtures.bytes("styled.epub"), "styled.epub")
+        assertEquals("含 h1 的章照记层级", 1, styled.chapters[0].headingLevels.first())
+        assertTrue(
+            "无标题章（纯 p）应全 null",
+            styled.chapters[1].headingLevels.all { it == null }
+        )
+    }
 }

@@ -12,6 +12,7 @@ import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -150,5 +151,81 @@ class ReaderStyleMergeTest {
         assertEquals(21.0, wcagContrast(0xFFFFFFFF.toInt(), 0xFF000000.toInt()), 0.05)
         // 同色 = 1:1
         assertEquals(1.0, wcagContrast(0xFF123456.toInt(), 0xFF123456.toInt()), 1e-6)
+    }
+
+    // ---------------- F2.17（M15）默认标题层级（TC-UT-18） ----------------
+
+    /** 默认层级倍率表：H1~H6 逐级递减；越界（0/7/负数）→ 1f */
+    @Test
+    fun headingFontScale_table() {
+        assertEquals(1.6f, headingFontScale(1), 1e-5f)
+        assertEquals(1.45f, headingFontScale(2), 1e-5f)
+        assertEquals(1.3f, headingFontScale(3), 1e-5f)
+        assertEquals(1.2f, headingFontScale(4), 1e-5f)
+        assertEquals(1.1f, headingFontScale(5), 1e-5f)
+        assertEquals(1.05f, headingFontScale(6), 1e-5f)
+        assertEquals(1f, headingFontScale(0), 1e-5f)
+        assertEquals(1f, headingFontScale(7), 1e-5f)
+        assertEquals(1f, headingFontScale(-1), 1e-5f)
+    }
+
+    /** 书未声明字号的标题段：字号 = 全局 × 默认倍率、行距等比跟随、默认加粗（F2.17） */
+    @Test
+    fun heading_defaultScaleAndBold() {
+        val h1 = applyParagraphHints(base, null, ReadingTheme.DEFAULT, headingLevel = 1)
+        assertEquals(16f * 1.6f, h1.fontSize.value, 1e-4f)
+        assertEquals(24f * 1.6f, h1.lineHeight.value, 1e-4f) // 行距随字号等比，保持全局比例
+        assertEquals(FontWeight.Bold, h1.fontWeight)
+
+        val h6 = applyParagraphHints(base, null, ReadingTheme.DEFAULT, headingLevel = 6)
+        assertEquals(16f * 1.05f, h6.fontSize.value, 1e-4f)
+        assertEquals(FontWeight.Bold, h6.fontWeight)
+    }
+
+    /** 书 CSS 已声明字号 → **覆盖**默认倍率（不相乘）；未声明字号的标题仍走默认倍率（F2.17） */
+    @Test
+    fun heading_bookCssOverridesDefaultScale() {
+        val h2 = applyParagraphHints(
+            base, ParagraphStyleHints(fontSizeEm = 1.1f), ReadingTheme.DEFAULT, headingLevel = 2
+        )
+        assertEquals("1.1 而非 1.45×1.1（覆盖非叠加）", 16f * 1.1f, h2.fontSize.value, 1e-4f)
+        val h3 = applyParagraphHints(
+            base, ParagraphStyleHints(fontSizeEm = 2f), ReadingTheme.DEFAULT, headingLevel = 3
+        )
+        assertEquals("2.0 而非 1.3×2", 32f, h3.fontSize.value, 1e-4f)
+        val h4 = applyParagraphHints(base, null, ReadingTheme.DEFAULT, headingLevel = 4)
+        assertEquals("未声明 → 默认 1.2", 16f * 1.2f, h4.fontSize.value, 1e-4f)
+    }
+
+    /** bold 三态（F2.17）：null → 默认加粗；true → 加粗；false → 非粗（遵循书） */
+    @Test
+    fun heading_boldThreeStates() {
+        assertEquals(
+            FontWeight.Bold,
+            applyParagraphHints(base, null, ReadingTheme.DEFAULT, headingLevel = 2).fontWeight
+        )
+        assertEquals(
+            FontWeight.Bold,
+            applyParagraphHints(base, ParagraphStyleHints(bold = true), ReadingTheme.DEFAULT, headingLevel = 2).fontWeight
+        )
+        assertEquals(
+            FontWeight.Normal,
+            applyParagraphHints(base, ParagraphStyleHints(bold = false), ReadingTheme.DEFAULT, headingLevel = 2).fontWeight
+        )
+    }
+
+    /** 非标题段行为与 M15 前完全一致（headingLevel = null 零变化） */
+    @Test
+    fun nonHeading_unchanged() {
+        val plain = applyParagraphHints(base, null, ReadingTheme.DEFAULT, headingLevel = null)
+        assertEquals(base.fontSize.value, plain.fontSize.value, 1e-5f)
+        assertEquals(base.lineHeight.value, plain.lineHeight.value, 1e-5f)
+        assertNull("非标题段不默认加粗", plain.fontWeight)
+
+        val styled = applyParagraphHints(
+            base, ParagraphStyleHints(fontSizeEm = 1.5f), ReadingTheme.DEFAULT, headingLevel = null
+        )
+        assertEquals(24f, styled.fontSize.value, 1e-4f)
+        assertNull("非标题段不因 CSS 字号而默认加粗", styled.fontWeight)
     }
 }
