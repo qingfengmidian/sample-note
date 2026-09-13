@@ -1,49 +1,38 @@
-# M12 续接笔记（下次启动从这里继续）
+# M12 收口记录（原续接笔记）
 
-日期：2026-09-12　状态：**代码全部完成并提交，仅剩真机验收与打 tag**
+日期：2026-09-13　状态：**代码 + 真机验收全部完成，仅剩提交/打 tag（待用户批准）与 D11 体感终审**
 
-## 一、已完成（不要重做）
+验收详情见 `docs/collab/reviews/m12-acceptance.md`。
 
-M12 阅读器改版 + 真机反馈热修全部落地，提交链（main 直提）：
+## 一、本轮完成（2026-09-13 真机验收）
 
-```
-a8b463f docs: M12 热修简报 + 决策日志 D-2026-09-12-03
-0c61549 test(red): 正文 svg 内嵌位图 + 空章跳过（5 例红）
-06a78b8 fix: 正文 svg 内嵌位图提取（F2.14）+ 空章跳过（F4.7 断链），254/0
-331e748 fix(ui): 进度条（F4.8）暂时隐藏——组件与用例保留
-06cf42d test: 设备端测试基建修复
-14324b2 docs: M12 收尾记录（M12a/b/c，248/0）
-（更早：fb56f2f M12a / a86b0f3 M12b / 4f094bd M12c，红测试分别为 9d2b170 / dc45b7f / 713e3e0）
-```
+- **设备端全量套件真机复跑：12 例 / 0 失败 / 1 跳过**（OPPO Reno9 PHM110，WiFi adb，25.8s）；单测 254/0/1skip + `validateFixtures` 本轮实测复核。
+- **修复 MdTocDeviceTest 两例确定性失败**（测试代码缺陷，非应用 bug，`app/src/androidTest/.../MdTocDeviceTest.kt`）：
+  1. 位置依赖 → 新增 `openFixtureAtTop()` 有界滑回顶部锚点（进度按 uri 落库恢复致首段不在语义树）；
+  2. 几何依赖 + 精确串 → 结尾改断言跳转目标 `"##### 标题五（H5）"`（源码段保留全部 # 前缀）。
+  09-12 的「用户用手机致失焦」归因不成立。
+- **D9** 真机通过（ReaderWindowDeviceTest.anchorToc 首过；进度条顺延）；**D10** 《邓小平文选》四项全过（目录原样/跳转/出版说明顶栏留空/书名页非白屏）；**D11** many_chapters 120 章连续滚动通过（PSS +6.5MB、无 ANR；体感待用户终审）；**D5** Magnifica md 切换/深跳/杀进程重开全过。
+- **真实书附加走查**：Flatland.epub（665KB，Calibre 真 CSS+字体+插图+嵌套 NCX）打开/目录/插图/CSS/跨章滚动全过，PSS 123.6MB 无膨胀。
+- 文档回写：`pending-real-device-tests.md` D5/D9/D10/D11 勾选 + 表头状态；本文件。
 
-- 单测基线：**254 用例 0 失败（1 跳过 = 进度条 @Ignore，随 F4.8 恢复时一起恢复）**。
-- 热修（`06a78b8`）已模拟器端到端验证：`/sdcard/Download/dxp.epub`（《邓小平文选》，1395431 字节，本地副本 `/tmp/dxp.epub`）书名页渲染图片非白屏（截图 216KB vs 白屏 23KB，`content-desc="图片"`×2）、从封面连滑到 1950 年文章无卡无崩溃。
-- 进度条相关用例已 `@Ignore`：`ReaderWindowTest.progressBar_fractionAndSeekMaterializesTargetChapter`、`ReaderWindowDeviceTest.progressBar_exists_andSeekChangesPosition`。
+## 二、待办
 
-## 二、待办（下次启动从这里继续）
-
-1. **重连 OPPO 真机**（WiFi adb 又断，当前 `adb devices` 仅剩 emulator-5554）。重连后先 `adb devices` 确认。
-2. **跑剩余设备端用例**（上次 12 例中 10 过，剩 2 例归因「跑测试时用户正在用手机」致 Activity 失焦）：
-   ```bash
-   ./gradlew connectedDebugAndroidTest --tests "com.sample.docreader.MdTocDeviceTest"
-   ```
-   期待 2/2 绿（tocPanel / previewMode）。
-3. **D 项真机复验**（人眼 + 设备端断言，见 `docs/collab/pending-real-device-tests.md`）：
-   - **D9**（TC-UI-12）：`anchor_toc.epub` 目录面板 = NCX 5 条原样、锚点条目定位正确（**进度条部分已随 F4.8 隐藏转「恢复时再做」**）。
-   - **D10**（《邓小平文选》三项）：目录面板 = 文件自带「第一卷/书名页/版权页/目录/各篇文章」（无「第 N 章」）；「出版说明」章顶栏留空；点目录条目跳转正确。热修后**补验第 0 章（书名页）不再是白屏**。
-   - **D11**（连续滚动体感）：`many_chapters.epub` 从开头连滑到结尾不点菜单（进度条拖动部分已随 F4.8 隐藏转恢复时再做）。
-   - **D5**（长文档 md）：真实长 md（`/Users/xukk/Documents/books/` 下有 md，或「Magnifica-Humanitas」开头的 md）源码↔预览切换语义位置一致、目录深跳、杀进程重开回到标题。
-4. **写验收记录** `docs/collab/reviews/m12-acceptance.md`（模板参考同目录 m10/m11 验收），回写 `pending-real-device-tests.md` 勾记 D5/D9/D10/D11 与 D1~D4/D7/D8 现状。
-5. **打 `m12` tag**（`git tag m12`，主仓库里程碑 tag 惯例）。
+1. **用户终审**：D11 连续滚动流畅度体感（自动化只能证明无卡死/无 OOM/位置正确）。
+2. **提交本轮变更**（需用户批准）：
+   - `app/src/androidTest/java/com/sample/docreader/MdTocDeviceTest.kt`（测试位置无关化 + 精确串）
+   - `docs/collab/reviews/m12-acceptance.md`（新增）
+   - `docs/collab/pending-real-device-tests.md`、`docs/collab/m12-resume-notes.md`（回写）
+   - `AGENTS.md`（M12 真机验收完成状态）
+3. **打 `m12` tag**（里程碑 tag 惯例，主仓库）。
 
 ## 三、环境备忘
 
-- 真书目录：`/Users/xukk/Documents/books/`（epub + md）。调试用《邓小平文选》已 push 到模拟器 `/sdcard/Download/dxp.epub`。
-- 模拟器：Pixel_7（`emulator-5554`，qemu pid 见 `ps aux | grep qemu`；显示截图 900×2000，orig 坐标 = 显示坐标 ×1.2）。
-- **本会话限制**：图片/截图工具（ReadMediaFile / kimi-cu 截图）返回 `[Unsupported Image]`，我看不到像素——设备/模拟器验证一律用 `adb shell uiautomator dump` 抓文本 + 截图文件大小判别「空白 vs 有内容」，不要靠肉眼读图。
-- 双 agent 协作：OpenCode 派发命令（**必须带 `--auto`**）：
-  ```bash
-  /Users/xukk/.opencode/bin/opencode run --auto -m deepseek/deepseek-v4-flash --title "..." "提示词"
-  ```
-  红测试断言实现方不得改；Kimi 框定 + 独立审查。
-- 提交需用户批准；release 构建需 `-x lintVitalRelease`（本机代理失效）。
+- 真机：OPPO Reno9 5G（PHM110，1080×2412），WiFi adb；断线套路 `adb kill-server; adb start-server`（有时需手机侧重开无线调试）。
+- `connectedDebugAndroidTest` 结束会**卸载应用**，验收后需 `adb install -r app/build/outputs/apk/debug/app-debug.apk`（WiFi 传输可达 8 分钟，USB 更稳）。
+- 打开真机文件（SAF 之外）：MediaStore 注册后 `am start -a VIEW -d content://media/external/file/<id> --grant-read-uri-permission`；
+  查 id：`adb shell content query --uri content://media/external/file --projection _id:_data --where "_display_name='x.epub'"`（**冒号分隔**投影，整条命令外层双引号防单引号被吞）。
+- 已推送真机：`/sdcard/Download/{dxp.epub, Magnifica-Humanitas.md, Flatland.epub}`；id 分别 1000600273 / 1000600274 / 1000592387（重启后可能变，按名查）。
+- 观察工具：`uiautomator dump` 文本 + bounds（`/tmp/dui2.py` 分区打印）；[0,0][0,0] = 离屏已组合项（细条/缓冲），**不代表异常**；截图体积判白屏。
+- 本会话限制：图片工具返回 `[Unsupported Image]`，像素判据用 dump 语义 + 截图体积，观感项交用户。
+- 双 agent 协作：OpenCode 派发命令（**必须带 `--auto`**）；红测试断言实现方不得改；Kimi 框定 + 独立审查。
+- release 构建需 `-x lintVitalRelease`（本机代理失效）。
