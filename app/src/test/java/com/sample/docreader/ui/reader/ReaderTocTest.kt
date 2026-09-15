@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performClick
 import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.Document
+import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.TocEntry
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -97,7 +98,12 @@ class ReaderTocTest {
     fun tocSheet_clickEntry_carriesEntry() {
         var selected: TocEntry? = null
         composeRule.setContent {
-            TocSheetContent(toc = toc, selectedIndex = 0, onSelect = { selected = it })
+            TocSheetContent(
+                toc = toc,
+                selectedIndex = 0,
+                accent = ReadingTheme.DEFAULT.foreground, // M13：本类不断言颜色，取中性值
+                onSelect = { selected = it }
+            )
         }
         composeRule.waitForIdle()
 
@@ -111,7 +117,12 @@ class ReaderTocTest {
     @Test
     fun tocList_selectedSemantics() {
         composeRule.setContent {
-            TocListContent(toc = toc, selectedIndex = 1, onSelect = {})
+            TocListContent(
+                toc = toc,
+                selectedIndex = 1,
+                onSelect = {},
+                accent = ReadingTheme.DEFAULT.foreground // M13：本类不断言颜色，取中性值
+            )
         }
         composeRule.waitForIdle()
 
@@ -124,7 +135,12 @@ class ReaderTocTest {
     @Test
     fun tocList_noHighlightWhenSelectedIndexMinusOne() {
         composeRule.setContent {
-            TocListContent(toc = toc, selectedIndex = -1, onSelect = {})
+            TocListContent(
+                toc = toc,
+                selectedIndex = -1,
+                onSelect = {},
+                accent = ReadingTheme.DEFAULT.foreground // M13：本类不断言颜色，取中性值
+            )
         }
         composeRule.waitForIdle()
         listOf("标题一", "标题二", "标题三").forEach {

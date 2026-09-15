@@ -16,6 +16,7 @@ import androidx.compose.ui.test.swipeDown
 import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.Document
+import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.TocEntry
 import com.sample.docreader.core.parse.EpubParser
 import com.sample.docreader.core.parse.Fixtures
@@ -203,6 +204,7 @@ class ReaderWindowTest {
             ChapterSheetContent(
                 toc = doc.toc,
                 selectedIndex = -1,
+                accent = ReadingTheme.DEFAULT.foreground, // M13：本类不断言颜色，取中性值
                 onSelect = { selected = it },
                 onPrev = {},
                 onNext = {},
@@ -296,6 +298,7 @@ class ReaderWindowTest {
             ChapterSheetContent(
                 toc = doc.toc,
                 selectedIndex = 0,
+                accent = ReadingTheme.DEFAULT.foreground, // M13：本类不断言颜色，取中性值
                 onSelect = { picked += it },
                 onPrev = {},
                 onNext = {},

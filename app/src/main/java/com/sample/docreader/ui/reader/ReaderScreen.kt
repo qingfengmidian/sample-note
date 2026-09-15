@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -247,6 +248,8 @@ fun ReaderContent(
 ) {
     val settings = state.settings
     val theme = resolveReadingTheme(settings.theme)
+    // M13（F4.4/F4.5）：面板/菜单强调色随阅读主题（对 theme.background 对比度 ≥4.5:1），不取 colorScheme
+    val accent = theme.foreground
     val document = state.document
     val chapters = document?.chapters.orEmpty()
     val chapter = chapters.getOrNull(state.chapterIndex)
@@ -565,6 +568,7 @@ fun ReaderContent(
             ChapterSheetContent(
                 toc = toc,
                 selectedIndex = epubTocSelectedIndex(toc, state.chapterIndex, visibleParagraph),
+                accent = accent,
                 onSelect = { entry ->
                     chapterSheetOpen = false
                     // F2.16：锚点跳转——目标章未物化先物化，再滚到锚点全局 item 并立即落库
@@ -599,6 +603,7 @@ fun ReaderContent(
             TocSheetContent(
                 toc = toc,
                 selectedIndex = selectedTocIndex,
+                accent = accent,
                 onSelect = { entry ->
                     tocSheetOpen = false
                     tocJumpParagraph = entry.paragraphIndex
@@ -618,6 +623,7 @@ fun ReaderContent(
                 settings = settings,
                 isTxt = isTxt,
                 encodingOverride = state.encodingOverride,
+                accent = accent,
                 onSelectWrapMode = { mode ->
                     // 换行切换位置保持（F2.2/TC-UI-01）：切换前记录首可见段落索引，重组后由上方 LaunchedEffect 滚回
                     if (mode != settings.wrapMode) pendingParagraph = listState.firstVisibleItemIndex
@@ -636,6 +642,13 @@ fun ReaderContent(
 }
 
 /**
+ * M13（F4.4/F4.5）：面板强调色语义键——记录选中勾/当前目录项等控件**实际绘制所用**的强调色
+ * （= 阅读主题前景色，对 `theme.background` 对比度 ≥4.5:1），供 UI 测试断色值（TC-UI-13/14；
+ * 同 TC-UI-03 的 ReaderBackground/ForegroundColorKey 机制，不用像素截图）。键必须与绘制同一局部值。
+ */
+val ReaderPanelAccentColorKey = SemanticsPropertyKey<Color>("ReaderPanelAccent")
+
+/**
  * epub 章节/目录面板主体（F4.5/F2.16）：数据源为 [toc]（文件自带目录原样，条目/标题/层级均不改写，
  * 见 [TocListContent]）+ 底部上一章/下一章翻章按钮（按 spine，边界置灰，与目录有无无关）。
  * 从 ModalBottomSheet 抽出以便 Robolectric 直驱（同 md 目录面板 TocSheetContent 的做法）。
@@ -644,6 +657,7 @@ fun ReaderContent(
 internal fun ChapterSheetContent(
     toc: List<TocEntry>,
     selectedIndex: Int,
+    accent: Color,
     onSelect: (TocEntry) -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
@@ -656,7 +670,7 @@ internal fun ChapterSheetContent(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(vertical = 8.dp)
         )
-        TocListContent(toc, selectedIndex, onSelect)
+        TocListContent(toc, selectedIndex, onSelect, accent = accent)
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -706,6 +720,7 @@ internal fun ReaderSettingsSheetContent(
     settings: ReadingSettings,
     isTxt: Boolean,
     encodingOverride: String?,
+    accent: Color,
     onSelectWrapMode: (WrapMode) -> Unit,
     onFontSizeStep: (Int) -> Unit,
     onSelectLineHeight: (Int) -> Unit,
@@ -728,12 +743,14 @@ internal fun ReaderSettingsSheetContent(
             SheetRadioOption(
                 label = "自动换行",
                 selected = settings.wrapMode == WrapMode.WRAP,
+                accent = accent,
                 onClick = { onSelectWrapMode(WrapMode.WRAP) },
                 modifier = Modifier.weight(1f)
             )
             SheetRadioOption(
                 label = "不换行",
                 selected = settings.wrapMode == WrapMode.NO_WRAP,
+                accent = accent,
                 onClick = { onSelectWrapMode(WrapMode.NO_WRAP) },
                 modifier = Modifier.weight(1f)
             )
@@ -763,6 +780,7 @@ internal fun ReaderSettingsSheetContent(
             SheetRadioOption(
                 label = "行距 $percent%",
                 selected = settings.lineHeightPercent == percent,
+                accent = accent,
                 onClick = { onSelectLineHeight(percent) }
             )
         }
@@ -773,6 +791,7 @@ internal fun ReaderSettingsSheetContent(
                 SheetRadioOption(
                     label = label,
                     selected = encodingOverride == charsetName,
+                    accent = accent,
                     onClick = { onSelectEncoding(charsetName) }
                 )
             }
@@ -790,6 +809,7 @@ internal fun ReaderSettingsSheetContent(
             SheetRadioOption(
                 label = fontLabel(font),
                 selected = settings.font == font,
+                accent = accent,
                 onClick = { onSelectFont(font) }
             )
         }
@@ -810,6 +830,7 @@ internal fun ReaderSettingsSheetContent(
             SheetRadioOption(
                 label = label,
                 selected = settings.theme == value,
+                accent = accent,
                 onClick = { onSelectTheme(value) },
                 leading = value?.let { themeValue ->
                     {
@@ -839,40 +860,47 @@ private val THEME_OPTIONS: List<Pair<ReadingTheme?, String>> = listOf(
 
 /**
  * 面板单选项（U3）：Modifier.selectable + RadioButton 角色（自带 selected 语义）+ stateDescription，
- * 选中项末尾显示勾；整行 ≥ 48dp。
+ * 选中项末尾显示勾；整行 ≥ 48dp。M13：选中勾强调色随阅读主题（[accent]，语义键记录**实际绘制**色）。
  */
 @Composable
 private fun SheetRadioOption(
     label: String,
     selected: Boolean,
+    accent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leading: (@Composable () -> Unit)? = null
 ) {
+    // M13 红（契约参数已就位、待接线）：实现批次改为 accent；语义键必须与绘制使用同一局部值
+    val markColor = MaterialTheme.colorScheme.primary
     Row(
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
             .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
-            .semantics { stateDescription = if (selected) "已选中" else "未选中" }
+            .semantics {
+                stateDescription = if (selected) "已选中" else "未选中"
+                if (selected) this[ReaderPanelAccentColorKey] = markColor
+            }
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         leading?.invoke()
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         if (selected) {
-            Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text("✓", color = markColor, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 /**
- * md 目录面板主体（F2.13）：标题 + [TocListContent]。
+ * md 目录面板主体（F2.13）：标题 + [TocListContent]。M13：当前项高亮强调色随阅读主题（[accent]）。
  * 从 ModalBottomSheet 抽出以便 Robolectric 直驱（同章节面板的做法，TC-F2-20a/b）。
  */
 @Composable
 internal fun TocSheetContent(
     toc: List<TocEntry>,
     selectedIndex: Int,
+    accent: Color,
     onSelect: (TocEntry) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -881,32 +909,39 @@ internal fun TocSheetContent(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(vertical = 8.dp)
         )
-        TocListContent(toc, selectedIndex, onSelect)
+        TocListContent(toc, selectedIndex, onSelect, accent = accent)
     }
 }
 
 /**
  * md 目录列表主体（F2.13）：按 level 缩进展示 H1~H6 层级，当前标题高亮
- * （主色+加粗+selected 语义，S11：selectedIndex = -1 时无高亮项）；点击目标 ≥ 48dp。
+ * （强调色+加粗+selected 语义，S11：selectedIndex = -1 时无高亮项）；点击目标 ≥ 48dp。
+ * M13：高亮色取 [accent]（阅读主题前景色），语义键记录**实际绘制**色。
  */
 @Composable
 internal fun TocListContent(
     toc: List<TocEntry>,
     selectedIndex: Int,
-    onSelect: (TocEntry) -> Unit
+    onSelect: (TocEntry) -> Unit,
+    accent: Color
 ) {
     LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
         itemsIndexed(toc, key = { index, _ -> index }) { index, entry ->
             val isCurrent = index == selectedIndex
+            // M13 红（契约参数已就位、待接线）：实现批次改为 accent；语义键必须与绘制使用同一局部值
+            val currentColor = MaterialTheme.colorScheme.primary
             Text(
                 entry.title,
-                color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                color = if (isCurrent) currentColor else Color.Unspecified,
                 fontWeight = if (isCurrent) FontWeight.Bold else null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .defaultMinSize(minHeight = 48.dp)
                     .clickable { onSelect(entry) }
-                    .semantics { selected = isCurrent } // 供无障碍与 UI 测试识别当前标题
+                    .semantics {
+                        selected = isCurrent // 供无障碍与 UI 测试识别当前标题
+                        if (isCurrent) this[ReaderPanelAccentColorKey] = currentColor
+                    }
                     .padding(
                         start = ((entry.level - 1) * 16).dp,
                         end = 16.dp,

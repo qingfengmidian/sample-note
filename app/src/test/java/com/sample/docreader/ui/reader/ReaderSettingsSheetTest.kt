@@ -47,6 +47,7 @@ class ReaderSettingsSheetTest {
                 settings = settings,
                 isTxt = isTxt,
                 encodingOverride = null,
+                accent = ReadingTheme.DEFAULT.foreground, // M13：本类不断言颜色，取中性值
                 onSelectWrapMode = onSelectWrapMode,
                 onFontSizeStep = onFontSizeStep,
                 onSelectLineHeight = onSelectLineHeight,

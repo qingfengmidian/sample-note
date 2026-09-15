@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import com.sample.docreader.core.model.Chapter
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.Document
+import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.TocEntry
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -90,6 +91,7 @@ class ReaderChapterListTest {
             ChapterSheetContent(
                 toc = toc,
                 selectedIndex = 0,
+                accent = ReadingTheme.DEFAULT.foreground, // M13：本类不断言颜色，取中性值
                 onSelect = { selected = it },
                 onPrev = {},
                 onNext = {},
@@ -111,6 +113,7 @@ class ReaderChapterListTest {
             ChapterSheetContent(
                 toc = toc,
                 selectedIndex = 2,
+                accent = ReadingTheme.DEFAULT.foreground, // M13：本类不断言颜色，取中性值
                 onSelect = {},
                 onPrev = {},
                 onNext = {},
@@ -136,6 +139,7 @@ class ReaderChapterListTest {
             ChapterSheetContent(
                 toc = toc,
                 selectedIndex = 0,
+                accent = ReadingTheme.DEFAULT.foreground, // M13：本类不断言颜色，取中性值
                 onSelect = {},
                 onPrev = { prevCalls++ },
                 onNext = { nextCalls++ },
