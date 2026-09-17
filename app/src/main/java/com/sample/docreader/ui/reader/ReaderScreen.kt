@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -35,6 +37,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -448,10 +451,19 @@ fun ReaderContent(
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "菜单")
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    // M13（F4.4/F4.5）：菜单容器/文字/禁用态随阅读主题（不取 colorScheme，避免明暗错配）
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        containerColor = theme.background
+                    ) {
                         if (isMd) {
                             DropdownMenuItem(
                                 text = { Text(if (mdPreview) "源码" else "预览") },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = theme.foreground,
+                                    disabledTextColor = theme.foreground.copy(alpha = 0.38f)
+                                ),
                                 onClick = {
                                     menuOpen = false
                                     // U4：切换前记录语义位置，重组后经 LaunchedEffect(mdPreview) 滚到映射目标
@@ -471,6 +483,10 @@ fun ReaderContent(
                             DropdownMenuItem(
                                 text = { Text(if (state.editable) "编辑" else EDIT_HINT_TOO_LARGE) },
                                 enabled = state.editable,
+                                colors = MenuDefaults.itemColors(
+                                    textColor = theme.foreground,
+                                    disabledTextColor = theme.foreground.copy(alpha = 0.38f)
+                                ),
                                 onClick = {
                                     menuOpen = false
                                     onEdit?.invoke()
@@ -480,6 +496,10 @@ fun ReaderContent(
                         // F4.4：阅读设置入口——唤起 ModalBottomSheet 设置面板
                         DropdownMenuItem(
                             text = { Text("阅读设置") },
+                            colors = MenuDefaults.itemColors(
+                                textColor = theme.foreground,
+                                disabledTextColor = theme.foreground.copy(alpha = 0.38f)
+                            ),
                             onClick = {
                                 menuOpen = false
                                 settingsSheetOpen = true
@@ -507,6 +527,10 @@ fun ReaderContent(
                     Text(state.error.orEmpty(), color = theme.foreground)
                     TextButton(
                         onClick = onBack,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = accent,
+                            disabledContentColor = accent.copy(alpha = 0.38f)
+                        ),
                         modifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .semantics { contentDescription = "返回" }
@@ -514,7 +538,10 @@ fun ReaderContent(
                 }
                 // 加载中：document 为 null 且无错误（避免 0 章 epub 误判为加载中而永久转圈）
                 state.loading || state.document == null ->
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    CircularProgressIndicator(
+                        color = theme.foreground,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
                 // TC-F2-24：空文件/空章节（0 字节、全空段落或 epub 空 spine）显示空态提示。
                 // M3：某章 images 非空（纯图章，解析层已合成空宿主段落）时不得判空——需渲染图片；
                 // F4.7 连续滚动下空态判定上移到整本（isEmptyDoc），真正无图真空章仍走既有空态。
@@ -563,7 +590,8 @@ fun ReaderContent(
         ModalBottomSheet(
             onDismissRequest = { chapterSheetOpen = false },
             containerColor = theme.background,
-            contentColor = theme.foreground
+            contentColor = theme.foreground,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = accent) }
         ) {
             ChapterSheetContent(
                 toc = toc,
@@ -598,7 +626,8 @@ fun ReaderContent(
         ModalBottomSheet(
             onDismissRequest = { tocSheetOpen = false },
             containerColor = theme.background,
-            contentColor = theme.foreground
+            contentColor = theme.foreground,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = accent) }
         ) {
             TocSheetContent(
                 toc = toc,
@@ -617,7 +646,8 @@ fun ReaderContent(
         ModalBottomSheet(
             onDismissRequest = { settingsSheetOpen = false },
             containerColor = theme.background,
-            contentColor = theme.foreground
+            contentColor = theme.foreground,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = accent) }
         ) {
             ReaderSettingsSheetContent(
                 settings = settings,
@@ -678,6 +708,10 @@ internal fun ChapterSheetContent(
             TextButton(
                 onClick = onPrev,
                 enabled = prevEnabled,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = accent,
+                    disabledContentColor = accent.copy(alpha = 0.38f)
+                ),
                 modifier = Modifier
                     .weight(1f)
                     .defaultMinSize(minHeight = 48.dp)
@@ -686,6 +720,10 @@ internal fun ChapterSheetContent(
             TextButton(
                 onClick = onNext,
                 enabled = nextEnabled,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = accent,
+                    disabledContentColor = accent.copy(alpha = 0.38f)
+                ),
                 modifier = Modifier
                     .weight(1f)
                     .defaultMinSize(minHeight = 48.dp)
@@ -764,12 +802,20 @@ internal fun ReaderSettingsSheetContent(
             Text("${settings.fontSizeSp}sp", style = MaterialTheme.typography.bodyMedium)
             TextButton(
                 onClick = { onFontSizeStep(-1) },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = accent,
+                    disabledContentColor = accent.copy(alpha = 0.38f)
+                ),
                 modifier = Modifier
                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                     .semantics { contentDescription = "减小字号" }
             ) { Text("A-") }
             TextButton(
                 onClick = { onFontSizeStep(1) },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = accent,
+                    disabledContentColor = accent.copy(alpha = 0.38f)
+                ),
                 modifier = Modifier
                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                     .semantics { contentDescription = "增大字号" }
@@ -815,6 +861,10 @@ internal fun ReaderSettingsSheetContent(
         }
         TextButton(
             onClick = onImportFont,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = accent,
+                disabledContentColor = accent.copy(alpha = 0.38f)
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 48.dp)
@@ -871,8 +921,8 @@ private fun SheetRadioOption(
     modifier: Modifier = Modifier,
     leading: (@Composable () -> Unit)? = null
 ) {
-    // M13 红（契约参数已就位、待接线）：实现批次改为 accent；语义键必须与绘制使用同一局部值
-    val markColor = MaterialTheme.colorScheme.primary
+    // M13：强调色取阅读主题前景色（[accent]），语义键必须与绘制使用同一局部值
+    val markColor = accent
     Row(
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
@@ -928,8 +978,8 @@ internal fun TocListContent(
     LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
         itemsIndexed(toc, key = { index, _ -> index }) { index, entry ->
             val isCurrent = index == selectedIndex
-            // M13 红（契约参数已就位、待接线）：实现批次改为 accent；语义键必须与绘制使用同一局部值
-            val currentColor = MaterialTheme.colorScheme.primary
+            // M13：高亮色取阅读主题前景色（[accent]），语义键必须与绘制使用同一局部值
+            val currentColor = accent
             Text(
                 entry.title,
                 color = if (isCurrent) currentColor else Color.Unspecified,
