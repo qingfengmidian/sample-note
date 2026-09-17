@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">简易文档</string>
+    <!-- M14（F4.6）默认（英文）资源。键集与 values-zh 必须完全对等；
+         强制键契约见 docs/collab/briefs/m14-i18n.md T1（TC-UI-15/16 断言）。 -->
+    <string name="app_name">Sample Note</string>
+    <string name="home_open_file">Open file</string>
+    <string name="home_new_file">New file</string>
+    <string name="home_settings_cd">Settings</string>
+    <string name="home_fixtures_cd">Test fixtures</string>
+    <string name="reader_menu_cd">Menu</string>
+    <string name="reader_menu_settings">Reading settings</string>
+    <string name="reader_menu_preview">Preview</string>
+    <string name="reader_menu_edit">Edit</string>
+    <string name="reader_toc_cd">Table of contents</string>
+    <string name="common_back_cd">Back</string>
+    <string name="reader_error_unsupported_format">Unsupported format</string>
+    <string name="reader_error_provider_not_running">The file provider (e.g., cloud storage app) is not running. Open the corresponding app and try again.</string>
 </resources>
