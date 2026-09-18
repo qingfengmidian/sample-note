@@ -1,5 +1,6 @@
 package com.sample.docreader
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -12,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.sample.docreader.core.model.DocFormat
+import com.sample.docreader.core.settings.LocaleSwitcher
 import com.sample.docreader.ui.AppTheme
 import com.sample.docreader.ui.FixtureEntryScreen
 import com.sample.docreader.ui.HomeScreen
@@ -24,6 +26,14 @@ class MainActivity : ComponentActivity() {
 
     /** 外部 ACTION_VIEW 打开的文件 uri（singleTask 下经 onCreate/onNewIntent 汇入，交给首页嗅探后导航） */
     private val pendingViewUri = MutableStateFlow<Uri?>(null)
+
+    /**
+     * F4.9/M16：按持久语言覆盖包装 base context（跟随系统时原样返回）——「手动选择优先于系统语言」
+     * 在此路径保证；API 33+ 的框架态同步与重建见 LocaleSwitcher.applyToFramework / needsManualRecreate。
+     */
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LocaleSwitcher.wrapBaseContext(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

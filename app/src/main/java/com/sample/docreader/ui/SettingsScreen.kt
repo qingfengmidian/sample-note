@@ -35,10 +35,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sample.docreader.R
+import com.sample.docreader.core.model.AppLanguage
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.core.model.WrapMode
+import com.sample.docreader.core.settings.LocaleSwitcher
 import com.sample.docreader.core.settings.SettingsRepository
 import com.sample.docreader.ui.reader.ReaderViewModel
 import kotlinx.coroutines.Dispatchers
@@ -52,6 +54,7 @@ import java.util.UUID
  * 全局阅读默认项（M8a，F4.3/TC-F4-03）：默认字号/行距/换行/字体/主题，修改即时经 SettingsRepository
  * 持久化；档位序列与阅读页 ReaderViewModel（stepFontSize/cycleLineHeight/cycleFont/cycleTheme）完全一致，
  * 阅读页订阅同一份 settings flow，新打开的文件自然应用新默认值。
+ * M16（F4.9）：顶部「通用」小节的语言行（跟随系统/中文/英文）写独立 DataStore 键并即时重建生效。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +62,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val repository = remember { SettingsRepository(context) }
     val settings by repository.settings.collectAsStateWithLifecycle(initialValue = ReadingSettings())
+    // F4.9/M16：语言覆盖与阅读设置键级隔离，故单独订阅（缺失/未知标签 = 跟随系统）
+    val language by repository.appLanguage.collectAsStateWithLifecycle(initialValue = AppLanguage.SYSTEM)
     val scope = rememberCoroutineScope()
     var message by remember { mutableStateOf<String?>(null) }
 
@@ -104,6 +109,25 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // F4.9/M16：应用内语言（跟随系统/中文/English），选中即时持久化；<33 自行重建，33+ 由框架重建
+            Text(stringResource(R.string.settings_general_section), style = MaterialTheme.typography.titleSmall)
+            CycleSettingRow(
+                title = stringResource(R.string.settings_language),
+                value = when (language) {
+                    AppLanguage.SYSTEM -> stringResource(R.string.settings_language_system)
+                    AppLanguage.ZH -> stringResource(R.string.settings_language_zh)
+                    AppLanguage.EN -> stringResource(R.string.settings_language_en)
+                },
+                onClick = {
+                    val next = LocaleSwitcher.next(language)
+                    scope.launch {
+                        // 先落库再切换：重建时 attachBaseContext 必须读到新值
+                        repository.saveAppLanguage(next)
+                        LocaleSwitcher.applyToFramework(context, next)
+                        if (LocaleSwitcher.needsManualRecreate) (context as? android.app.Activity)?.recreate()
+                    }
+                }
+            )
             Text(stringResource(R.string.settings_font_scheme), style = MaterialTheme.typography.titleSmall)
             Text(
                 stringResource(R.string.settings_current, fontLabel(settings.font)),
