@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- M14（F4.6）中文资源。键集与默认资源 values/strings.xml 必须完全对等；
+         中文值为 M14 前代码内中文文案逐字沿用（强制键契约见 docs/collab/briefs/m14-i18n.md T1）。 -->
+    <string name="app_name">简记</string>
+
+    <!-- common：跨界面共用（对话框按钮/语义描述等） -->
+    <string name="common_back_cd">返回</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_ok">确定</string>
+    <string name="common_save">保存</string>
+    <string name="common_discard">放弃</string>
+    <string name="common_delete">删除</string>
+    <string name="common_switch">切换</string>
+    <string name="common_state_selected">已选中</string>
+    <string name="common_state_unselected">未选中</string>
+
+    <!-- home：首页（最近列表 + 打开/新建入口 + 一次性提示） -->
+    <string name="home_open_file">打开文件</string>
+    <string name="home_new_file">新建文件</string>
+    <string name="home_settings_cd">设置</string>
+    <string name="home_fixtures_cd">测试样本</string>
+    <string name="home_empty_hint">暂无最近文件，点击下方\"打开文件\"选择文档</string>
+    <string name="home_recent_title">最近打开</string>
+    <string name="home_clear_recent">清空最近列表</string>
+    <string name="home_new_markdown">Markdown（.md）</string>
+    <string name="home_new_plaintext">纯文本（.txt）</string>
+    <string name="home_new_markdown_cd">新建 Markdown</string>
+    <string name="home_new_plaintext_cd">新建纯文本</string>
+    <string name="home_untitled_md">未命名.md</string>
+    <string name="home_untitled_txt">未命名.txt</string>
+    <string name="home_untitled_base">未命名</string>
+    <string name="home_error_unsupported_format">不支持的文件格式：%1$s</string>
+    <string name="home_error_removed">无法访问该文件，已从最近列表移除</string>
+    <string name="home_error_create_failed">新建文件失败：无法访问所选位置</string>
+    <string name="home_error_open_failed">无法打开文件：权限不足或文件已被移动/删除</string>
+    <string name="home_error_provider_not_running">文件提供方（如云盘应用）未运行，请启动对应应用后重试</string>
+
+    <!-- reader：阅读界面（顶栏/菜单/目录/设置面板/错误态） -->
+    <string name="reader_menu_cd">菜单</string>
+    <string name="reader_menu_settings">阅读设置</string>
+    <string name="reader_menu_preview">预览</string>
+    <string name="reader_menu_source">源码</string>
+    <string name="reader_menu_edit">编辑</string>
+    <string name="reader_toc_cd">目录</string>
+    <string name="reader_chapters_cd">章节列表</string>
+    <string name="reader_toc_title">目录</string>
+    <string name="reader_chapters_title">章节</string>
+    <string name="reader_prev_chapter">上一章</string>
+    <string name="reader_next_chapter">下一章</string>
+    <string name="reader_layout">排版</string>
+    <string name="reader_auto_wrap">自动换行</string>
+    <string name="reader_no_wrap">不换行</string>
+    <string name="reader_font_size">字号</string>
+    <string name="reader_decrease_font_size">减小字号</string>
+    <string name="reader_increase_font_size">增大字号</string>
+    <string name="reader_line_spacing">行距 %1$d%%</string>
+    <string name="reader_encoding">编码</string>
+    <string name="reader_encoding_auto">自动探测</string>
+    <string name="reader_font">字体</string>
+    <string name="reader_font_code">代码</string>
+    <string name="reader_font_serif">衬线</string>
+    <string name="reader_font_sans">无衬线</string>
+    <string name="reader_font_custom">自定义</string>
+    <string name="reader_import_font">导入自定义字体（ttf/otf）</string>
+    <string name="reader_import_font_cd">导入字体</string>
+    <string name="reader_theme">主题</string>
+    <string name="reader_theme_system">跟随系统</string>
+    <string name="reader_theme_default">默认白</string>
+    <string name="reader_theme_eye_care">护眼绿</string>
+    <string name="reader_theme_soft">柔光米黄</string>
+    <string name="reader_theme_night">夜间黑</string>
+    <string name="reader_empty">文件为空</string>
+    <string name="reader_edit_too_large">编辑（文件超过 2MB，仅可只读）</string>
+    <string name="reader_error_unsupported_format">不支持的格式</string>
+    <string name="reader_error_missing_opf">epub 缺少 OPF 描述文件，无法解析</string>
+    <string name="reader_error_malformed_content">内容解析失败</string>
+    <string name="reader_error_too_large">文件过大，超出可编辑上限</string>
+    <string name="reader_error_no_permission">文件访问权限不足或已被移动/删除</string>
+    <string name="reader_error_provider_not_running">文件提供方（如云盘应用）未运行，请启动对应应用后重试</string>
+    <string name="reader_image_unavailable">图片无法显示</string>
+    <string name="reader_image_cover">封面</string>
+    <string name="reader_image_generic">图片</string>
+    <string name="reader_font_import_failed">导入失败</string>
+    <string name="reader_font_imported">自定义字体已导入</string>
+    <string name="reader_progress">阅读进度，第 %1$d/%2$d 段</string>
+
+    <!-- settings：设置页（字体方案/编辑器/阅读默认值） -->
+    <string name="settings_title">设置</string>
+    <string name="settings_font_scheme">字体方案</string>
+    <string name="settings_current">当前：%1$s</string>
+    <string name="settings_custom_font_enabled">已启用自定义字体</string>
+    <string name="settings_custom_font_enabled_named">已启用自定义字体：%1$s</string>
+    <string name="settings_editor_section">编辑器</string>
+    <string name="settings_auto_save">自动保存</string>
+    <string name="settings_auto_save_desc">编辑停顿 3 秒后自动写回文件（默认关闭）</string>
+    <string name="settings_auto_save_cd">自动保存开关</string>
+    <string name="settings_reading_defaults">阅读默认值</string>
+    <string name="settings_default_font_size">默认字号</string>
+    <string name="settings_decrease_font_size_cd">减小默认字号</string>
+    <string name="settings_increase_font_size_cd">增大默认字号</string>
+    <string name="settings_default_line_spacing">默认行距</string>
+    <string name="settings_default_wrap_mode">默认换行模式</string>
+    <string name="settings_default_font">默认字体</string>
+    <string name="settings_default_theme">默认阅读主题</string>
+    <string name="settings_font_code">代码风格（等宽）</string>
+    <string name="settings_font_read_failed">无法读取所选文件</string>
+    <string name="settings_font_invalid">字体文件无效，请选择有效的 ttf/otf</string>
+
+    <!-- fixture：测试样本入口（debug 门控） -->
+    <string name="fixture_title">测试样本（M3 开发入口）</string>
+
+    <!-- editor：编辑界面（顶栏/退出对话框/保存反馈） -->
+    <string name="editor_undo">撤销</string>
+    <string name="editor_redo">重做</string>
+    <string name="editor_content_cd">编辑区</string>
+    <string name="editor_unsaved_title">未保存的修改</string>
+    <string name="editor_unsaved_message">是否保存对文件的修改？</string>
+    <string name="editor_save_success">已保存</string>
+    <string name="editor_save_failed">保存失败，文件提供方不支持写入或文件不可写，请另存为</string>
+</resources>

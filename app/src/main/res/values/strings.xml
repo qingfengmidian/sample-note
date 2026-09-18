@@ -3,16 +3,119 @@
     <!-- M14（F4.6）默认（英文）资源。键集与 values-zh 必须完全对等；
          强制键契约见 docs/collab/briefs/m14-i18n.md T1（TC-UI-15/16 断言）。 -->
     <string name="app_name">Sample Note</string>
+
+    <!-- common：跨界面共用（对话框按钮/语义描述等） -->
+    <string name="common_back_cd">Back</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_ok">OK</string>
+    <string name="common_save">Save</string>
+    <string name="common_discard">Discard</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_switch">Switch</string>
+    <string name="common_state_selected">Selected</string>
+    <string name="common_state_unselected">Not selected</string>
+
+    <!-- home：首页（最近列表 + 打开/新建入口 + 一次性提示） -->
     <string name="home_open_file">Open file</string>
     <string name="home_new_file">New file</string>
     <string name="home_settings_cd">Settings</string>
     <string name="home_fixtures_cd">Test fixtures</string>
+    <string name="home_empty_hint">No recent files. Tap \"Open file\" below to choose a document.</string>
+    <string name="home_recent_title">Recent</string>
+    <string name="home_clear_recent">Clear recent list</string>
+    <string name="home_new_markdown">Markdown (.md)</string>
+    <string name="home_new_plaintext">Plain text (.txt)</string>
+    <string name="home_new_markdown_cd">New Markdown</string>
+    <string name="home_new_plaintext_cd">New plain text</string>
+    <string name="home_untitled_md">Untitled.md</string>
+    <string name="home_untitled_txt">Untitled.txt</string>
+    <string name="home_untitled_base">Untitled</string>
+    <string name="home_error_unsupported_format">Unsupported file format: %1$s</string>
+    <string name="home_error_removed">The file cannot be accessed and has been removed from the recent list.</string>
+    <string name="home_error_create_failed">Failed to create the file: the selected location is not accessible.</string>
+    <string name="home_error_open_failed">Cannot open the file: insufficient permission, or the file has been moved/deleted.</string>
+    <string name="home_error_provider_not_running">The file provider (e.g., cloud storage app) is not running. Open the corresponding app and try again.</string>
+
+    <!-- reader：阅读界面（顶栏/菜单/目录/设置面板/错误态） -->
     <string name="reader_menu_cd">Menu</string>
     <string name="reader_menu_settings">Reading settings</string>
     <string name="reader_menu_preview">Preview</string>
+    <string name="reader_menu_source">Source</string>
     <string name="reader_menu_edit">Edit</string>
     <string name="reader_toc_cd">Table of contents</string>
-    <string name="common_back_cd">Back</string>
+    <string name="reader_chapters_cd">Chapters</string>
+    <string name="reader_toc_title">Table of contents</string>
+    <string name="reader_chapters_title">Chapters</string>
+    <string name="reader_prev_chapter">Previous chapter</string>
+    <string name="reader_next_chapter">Next chapter</string>
+    <string name="reader_layout">Layout</string>
+    <string name="reader_auto_wrap">Auto wrap</string>
+    <string name="reader_no_wrap">No wrap</string>
+    <string name="reader_font_size">Font size</string>
+    <string name="reader_decrease_font_size">Decrease font size</string>
+    <string name="reader_increase_font_size">Increase font size</string>
+    <string name="reader_line_spacing">Line spacing %1$d%%</string>
+    <string name="reader_encoding">Encoding</string>
+    <string name="reader_encoding_auto">Auto detect</string>
+    <string name="reader_font">Font</string>
+    <string name="reader_font_code">Monospace</string>
+    <string name="reader_font_serif">Serif</string>
+    <string name="reader_font_sans">Sans serif</string>
+    <string name="reader_font_custom">Custom</string>
+    <string name="reader_import_font">Import custom font (ttf/otf)</string>
+    <string name="reader_import_font_cd">Import font</string>
+    <string name="reader_theme">Theme</string>
+    <string name="reader_theme_system">System</string>
+    <string name="reader_theme_default">Default white</string>
+    <string name="reader_theme_eye_care">Eye-care green</string>
+    <string name="reader_theme_soft">Soft beige</string>
+    <string name="reader_theme_night">Night black</string>
+    <string name="reader_empty">File is empty</string>
+    <string name="reader_edit_too_large">Edit (file over 2 MB; read-only)</string>
     <string name="reader_error_unsupported_format">Unsupported format</string>
+    <string name="reader_error_missing_opf">Missing OPF descriptor in the epub; cannot parse.</string>
+    <string name="reader_error_malformed_content">Failed to parse the content.</string>
+    <string name="reader_error_too_large">The file is too large and exceeds the editable limit.</string>
+    <string name="reader_error_no_permission">Insufficient permission to access the file, or the file has been moved/deleted.</string>
     <string name="reader_error_provider_not_running">The file provider (e.g., cloud storage app) is not running. Open the corresponding app and try again.</string>
+    <string name="reader_image_unavailable">Image unavailable</string>
+    <string name="reader_image_cover">Cover</string>
+    <string name="reader_image_generic">Image</string>
+    <string name="reader_font_import_failed">Import failed</string>
+    <string name="reader_font_imported">Custom font imported</string>
+    <string name="reader_progress">Reading progress, %1$d/%2$d</string>
+
+    <!-- settings：设置页（字体方案/编辑器/阅读默认值） -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_font_scheme">Font scheme</string>
+    <string name="settings_current">Current: %1$s</string>
+    <string name="settings_custom_font_enabled">Custom font enabled</string>
+    <string name="settings_custom_font_enabled_named">Custom font enabled: %1$s</string>
+    <string name="settings_editor_section">Editor</string>
+    <string name="settings_auto_save">Auto save</string>
+    <string name="settings_auto_save_desc">Automatically write back after 3 seconds of inactivity (off by default)</string>
+    <string name="settings_auto_save_cd">Auto save switch</string>
+    <string name="settings_reading_defaults">Reading defaults</string>
+    <string name="settings_default_font_size">Default font size</string>
+    <string name="settings_decrease_font_size_cd">Decrease default font size</string>
+    <string name="settings_increase_font_size_cd">Increase default font size</string>
+    <string name="settings_default_line_spacing">Default line spacing</string>
+    <string name="settings_default_wrap_mode">Default wrap mode</string>
+    <string name="settings_default_font">Default font</string>
+    <string name="settings_default_theme">Default reading theme</string>
+    <string name="settings_font_code">Monospace (fixed width)</string>
+    <string name="settings_font_read_failed">Cannot read the selected file</string>
+    <string name="settings_font_invalid">Invalid font file. Please choose a valid ttf/otf.</string>
+
+    <!-- fixture：测试样本入口（debug 门控） -->
+    <string name="fixture_title">Test fixtures (M3 dev entry)</string>
+
+    <!-- editor：编辑界面（顶栏/退出对话框/保存反馈） -->
+    <string name="editor_undo">Undo</string>
+    <string name="editor_redo">Redo</string>
+    <string name="editor_content_cd">Editing area</string>
+    <string name="editor_unsaved_title">Unsaved changes</string>
+    <string name="editor_unsaved_message">Save changes to the file?</string>
+    <string name="editor_save_success">Saved</string>
+    <string name="editor_save_failed">Save failed. The file provider does not support writing or the file is not writable. Please use Save as.</string>
 </resources>

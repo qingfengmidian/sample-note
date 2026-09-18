@@ -1,6 +1,8 @@
 package com.sample.docreader.ui.editor
 
+import android.content.Context
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.test.core.app.ApplicationProvider
 import com.sample.docreader.core.io.DocumentWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,6 +21,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 
@@ -29,6 +32,7 @@ import java.io.OutputStream
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "zh")
 class EditorSaveResultTest {
 
     @get:Rule
@@ -60,11 +64,12 @@ class EditorSaveResultTest {
         assertNull("消费后 saveResult 应清除", vm.saveResult)
     }
 
-    /** saveResultMessage 三类结果分别给差异化文案 */
+    /** saveResultMessage 三类结果分别给差异化文案（M14：映射资源 id，经 zh 上下文解析，语义不变） */
     @Test
     fun saveResultMessage_mapsAllOutcomes() {
-        assertEquals("已保存", saveResultMessage(SaveResult.Success))
-        assertTrue(saveResultMessage(SaveResult.FailedSaveAs).contains("另存"))
-        assertTrue(saveResultMessage(SaveResult.ProviderKilled).contains("未运行"))
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertEquals("已保存", context.getString(saveResultMessage(SaveResult.Success)))
+        assertTrue(context.getString(saveResultMessage(SaveResult.FailedSaveAs)).contains("另存"))
+        assertTrue(context.getString(saveResultMessage(SaveResult.ProviderKilled)).contains("未运行"))
     }
 }

@@ -29,7 +29,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(shadows = [ShadowNoOpMagnifier::class])
+@Config(qualifiers = "zh", shadows = [ShadowNoOpMagnifier::class])
 class ReaderSelectionTest {
 
     @get:Rule

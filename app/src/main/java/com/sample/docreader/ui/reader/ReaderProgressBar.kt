@@ -16,11 +16,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.sample.docreader.R
 import com.sample.docreader.core.model.ReadingTheme
 import kotlin.math.roundToInt
 
@@ -65,7 +67,7 @@ fun ReaderProgressBar(
     val fraction = progressFraction(firstVisibleItemIndex, totalItems)
     val total = totalItems.coerceAtLeast(0)
     val current = if (total == 0) 0 else (firstVisibleItemIndex + 1).coerceIn(1, total)
-    val description = "阅读进度，第 $current/$total 段"
+    val description = stringResource(R.string.reader_progress, current, total)
     BoxWithConstraints(
         modifier = modifier
             .width(48.dp) // 无障碍：触摸目标 ≥48dp

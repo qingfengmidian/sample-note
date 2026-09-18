@@ -41,7 +41,7 @@ data class ReaderUiState(
     val loading: Boolean = true,
     val document: Document? = null,
     val settings: ReadingSettings = ReadingSettings(),
-    val error: String? = null,             // ParseException 差异化文案
+    val error: ReaderError? = null,        // M14（T3）：错误类型，UI 经 stringResource 映射文案
     val chapterIndex: Int = 0,             // 当前章节索引（epub 多章）
     val restoreParagraph: Int? = null,     // 加载/切章后待滚动到的段落索引（一次性）
     val editable: Boolean = true,          // 文件 ≤2MB 可编辑，超出只读（TC-F3-09，设计§8；真机验证 1.35MB 可编辑，5MB 触发 ANR）
@@ -159,22 +159,20 @@ class ReaderViewModel(
                     )
                 }
             } catch (e: ParseException) {
-                _uiState.update { it.copy(loading = false, error = e.message) }
+                _uiState.update { it.copy(loading = false, error = ReaderError.from(e)) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: FileNotFoundException) {
                 // 云盘 Provider 进程被系统/OEM 杀死时（S1 探针结论）访问会抛
                 // "No content provider ..."，不得误判权限失效；提示用户启动对应应用。
                 if ((e.message ?: "").contains("No content provider")) {
-                    _uiState.update {
-                        it.copy(loading = false, error = "文件提供方（如云盘应用）未运行，请启动对应应用后重试")
-                    }
+                    _uiState.update { it.copy(loading = false, error = ReaderError.ProviderNotRunning) }
                 } else {
-                    _uiState.update { it.copy(loading = false, error = ParseException.NoPermission().message) }
+                    _uiState.update { it.copy(loading = false, error = ReaderError.NoPermission) }
                 }
             } catch (e: Exception) {
                 // 文件读不到（被移动/删除等）统一按无权限提示
-                _uiState.update { it.copy(loading = false, error = ParseException.NoPermission().message) }
+                _uiState.update { it.copy(loading = false, error = ReaderError.NoPermission) }
             }
         }
     }

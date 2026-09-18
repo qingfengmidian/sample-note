@@ -1,6 +1,7 @@
 package com.sample.docreader.ui.editor
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -42,15 +44,18 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.sample.docreader.R
 import com.sample.docreader.core.io.ContentResolverDocumentWriter
 import com.sample.docreader.core.io.DelegatingFileOpener
 import com.sample.docreader.core.io.DraftStore
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.settings.SettingsRepository
+import com.sample.docreader.ui.reader.ReaderError
 import com.sample.docreader.ui.reader.ReaderReloadNotifier
 import com.sample.docreader.ui.reader.fontFamilyFor
 import com.sample.docreader.ui.reader.lineHeightSp
+import com.sample.docreader.ui.reader.readerErrorText
 import com.sample.docreader.ui.reader.resolveReadingTheme
 
 /** 编辑区容器 testTag，供 UI 测试定位 */
@@ -102,12 +107,12 @@ fun EditorScreen(
                     exitAfterSave = false
                     onBack()
                 } else {
-                    feedback = saveResultMessage(result)
+                    feedback = context.getString(saveResultMessage(result))
                 }
             }
             SaveResult.FailedSaveAs, SaveResult.ProviderKilled -> {
                 exitAfterSave = false
-                feedback = saveResultMessage(result)
+                feedback = context.getString(saveResultMessage(result))
             }
         }
         viewModel.consumeSaveResult()
@@ -145,20 +150,22 @@ fun EditorScreen(
     feedback?.let { message ->
         AlertDialog(
             onDismissRequest = { feedback = null },
-            title = { Text("保存") },
+            title = { Text(stringResource(R.string.common_save)) },
             text = { Text(message) },
             confirmButton = {
-                TextButton(onClick = { feedback = null }) { Text("确定") }
+                TextButton(onClick = { feedback = null }) { Text(stringResource(R.string.common_ok)) }
             }
         )
     }
 }
 
-/** 保存结果 → 提示文案（M7b；ProviderKilled 文案与阅读页对齐，见 S1 探针结论） */
-internal fun saveResultMessage(result: SaveResult): String = when (result) {
-    SaveResult.Success -> "已保存"
-    SaveResult.FailedSaveAs -> "保存失败，文件提供方不支持写入或文件不可写，请另存为"
-    SaveResult.ProviderKilled -> "文件提供方（如云盘应用）未运行，请启动对应应用后重试"
+/** 保存结果 → 提示文案资源（M7b；ProviderKilled 文案与阅读页对齐，见 S1 探针结论）。
+ *  M14（F4.6，T3）：改返回资源 id，由 UI 层经 stringResource/getString 映射，VM 不持有中文文案。 */
+@StringRes
+internal fun saveResultMessage(result: SaveResult): Int = when (result) {
+    SaveResult.Success -> R.string.editor_save_success
+    SaveResult.FailedSaveAs -> R.string.editor_save_failed
+    SaveResult.ProviderKilled -> R.string.reader_error_provider_not_running
 }
 
 /**
@@ -175,7 +182,7 @@ fun EditorContent(
     settings: ReadingSettings,
     displayName: String,
     loading: Boolean,
-    error: String?,
+    error: ReaderError?,
     showExitDialog: Boolean,
     onContentChange: (TextFieldValue) -> Unit,
     onUndo: () -> Unit,
@@ -187,6 +194,7 @@ fun EditorContent(
     onBack: () -> Unit
 ) {
     val theme = resolveReadingTheme(settings.theme)
+    val editorContentCd = stringResource(R.string.editor_content_cd)
     val textStyle = TextStyle(
         color = theme.foreground,
         fontSize = settings.fontSizeSp.sp,
@@ -201,14 +209,14 @@ fun EditorContent(
                 title = { Text(displayName, maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 actions = {
-                    EditorTopBarButton("撤销", enabled = canUndo, onClick = onUndo)
-                    EditorTopBarButton("重做", enabled = canRedo, onClick = onRedo)
+                    EditorTopBarButton(stringResource(R.string.editor_undo), enabled = canUndo, onClick = onUndo)
+                    EditorTopBarButton(stringResource(R.string.editor_redo), enabled = canRedo, onClick = onRedo)
                     // 保存：dirty 且有内容变更时可点（TC-F3-01/02，M7b 接通落盘）
-                    EditorTopBarButton("保存", enabled = dirty && !loading, onClick = onSave)
+                    EditorTopBarButton(stringResource(R.string.common_save), enabled = dirty && !loading, onClick = onSave)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = theme.background,
@@ -222,7 +230,7 @@ fun EditorContent(
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
                 error != null -> Text(
-                    error,
+                    readerErrorText(error),
                     color = theme.foreground,
                     modifier = Modifier.align(Alignment.Center)
                 )
@@ -236,7 +244,7 @@ fun EditorContent(
                         .fillMaxSize()
                         .background(theme.background)
                         .testTag(EDITOR_CONTENT_TAG)
-                        .semantics { contentDescription = "编辑区" }
+                        .semantics { contentDescription = editorContentCd }
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
@@ -275,7 +283,7 @@ private fun EditorExitDialog(
 ) {
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("未保存的修改") },
+        title = { Text(stringResource(R.string.editor_unsaved_title)) },
         text = { EditorExitDialogContent(onSave, onDiscard, onCancel) },
         confirmButton = {}
     )
@@ -293,34 +301,37 @@ internal fun EditorExitDialogContent(
     onDiscard: () -> Unit,
     onCancel: () -> Unit
 ) {
+    val saveLabel = stringResource(R.string.common_save)
+    val discardLabel = stringResource(R.string.common_discard)
+    val cancelLabel = stringResource(R.string.common_cancel)
     Column {
-        Text("是否保存对文件的修改？")
+        Text(stringResource(R.string.editor_unsaved_message))
         TextButton(
             onClick = onSave,
             modifier = Modifier
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 48.dp)
-                .semantics { contentDescription = "保存" }
+                .semantics { contentDescription = saveLabel }
         ) {
-            Text("保存")
+            Text(saveLabel)
         }
         TextButton(
             onClick = onDiscard,
             modifier = Modifier
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 48.dp)
-                .semantics { contentDescription = "放弃" }
+                .semantics { contentDescription = discardLabel }
         ) {
-            Text("放弃")
+            Text(discardLabel)
         }
         TextButton(
             onClick = onCancel,
             modifier = Modifier
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 48.dp)
-                .semantics { contentDescription = "取消" }
+                .semantics { contentDescription = cancelLabel }
         ) {
-            Text("取消")
+            Text(cancelLabel)
         }
     }
 }

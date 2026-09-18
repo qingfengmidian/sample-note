@@ -1,5 +1,6 @@
 package com.sample.docreader
 
+import android.content.Context
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -36,9 +38,11 @@ class MdTocDeviceTest {
     @get:Rule
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
+    private val uiContext: Context get() = ApplicationProvider.getApplicationContext()
+
     /** 首页顶栏 → 「测试样本」夹具入口；夹具列表为 LazyColumn，逐页上滑直到目标行可见。 */
     private fun openFixture(name: String) {
-        composeTestRule.onNodeWithText("测试样本").performClick()
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.home_fixtures_cd)).performClick()
         composeTestRule.waitForIdle()
         // M12 真机复盘：swipe fling 过冲会跳过尾部夹具，改 performScrollToNode 确定性滚动。
         composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText(name))
@@ -83,7 +87,7 @@ class MdTocDeviceTest {
     fun tocPanel_opens_showsHeadings_selectCloses() {
         openFixtureAtTop("sample_toc.md", "# 标题一（H1）")
         // 顶栏目录图标存在且可点
-        composeTestRule.onNodeWithContentDescription("目录").assertIsDisplayed().performClick()
+        composeTestRule.onNodeWithContentDescription(uiContext.getString(R.string.reader_toc_cd)).assertIsDisplayed().performClick()
         // 面板打开：无 # 前缀的标题行（仅面板持有该精确串）；等待滑入动画结束（bounds 稳定）
         waitTextDisplayed("标题一（H1）")
         waitTextDisplayed("标题五（H5）")
@@ -101,9 +105,9 @@ class MdTocDeviceTest {
     fun txtFile_hasNoTocIcon() {
         openFixture("empty.txt")
         composeTestRule.waitUntil(timeoutMillis = 15_000) {
-            composeTestRule.onAllNodesWithText("文件为空").fetchSemanticsNodes().isNotEmpty()
+            composeTestRule.onAllNodesWithText(uiContext.getString(R.string.reader_empty)).fetchSemanticsNodes().isNotEmpty()
         }
-        composeTestRule.onAllNodesWithContentDescription("目录").assertCountEquals(0)
+        composeTestRule.onAllNodesWithContentDescription(uiContext.getString(R.string.reader_toc_cd)).assertCountEquals(0)
     }
 
     /** U4/F2.13：预览视图下目录图标仍在、面板可开可跳。 */
@@ -112,18 +116,18 @@ class MdTocDeviceTest {
         // 位置无关化：前序用例（tocPanel）跳转后位置已落库，openFixtureAtTop 内滑回顶部再切预览
         openFixtureAtTop("sample_toc.md", "# 标题一（H1）")
         // ⋮ 菜单 → 预览
-        composeTestRule.onNodeWithContentDescription("菜单").performClick()
-        waitTextDisplayed("预览") // 下拉菜单滑入动画结束再点，否则点击落空（真机复盘 2026-09-12）
-        composeTestRule.onNodeWithText("预览").performClick()
+        composeTestRule.onNodeWithContentDescription(uiContext.getString(R.string.reader_menu_cd)).performClick()
+        waitTextDisplayed(uiContext.getString(R.string.reader_menu_preview)) // 下拉菜单滑入动画结束再点，否则点击落空（真机复盘 2026-09-12）
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.reader_menu_preview)).performClick()
         // 预览渲染完成（标题无 # 前缀）
         waitTextDisplayed("标题一（H1）", timeoutMillis = 10_000)
         // 预览下目录图标可用 → 面板打开 → 点击 H2 → 面板关闭。预览正文与面板行同名
         // （均无 # 前缀），用「文本 + click 动作」组合匹配器只命中面板行（正文块无 click 语义）。
-        composeTestRule.onNodeWithContentDescription("目录").assertIsDisplayed().performClick()
-        composeTestRule.onNodeWithText("目录").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription(uiContext.getString(R.string.reader_toc_cd)).assertIsDisplayed().performClick()
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.reader_toc_cd)).assertIsDisplayed()
         val tocRowH2 = composeTestRule.onNode(hasText("标题二（H2）") and hasClickAction())
         tocRowH2.assertIsDisplayed().performClick()
-        waitTextGone("目录")
+        waitTextGone(uiContext.getString(R.string.reader_toc_cd))
         // 断言跳转目标（面板已关，正文唯一命中；不断言 H1——同 tocPanel 的几何依赖问题）
         waitTextDisplayed("标题二（H2）")
     }

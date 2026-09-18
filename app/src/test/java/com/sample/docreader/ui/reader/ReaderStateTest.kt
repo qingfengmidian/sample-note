@@ -14,11 +14,13 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /** 阅读界面空态/错误态显示（TC-F2-24、ParseException 差异化文案） */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = "zh")
 class ReaderStateTest {
 
     @get:Rule
@@ -56,7 +58,7 @@ class ReaderStateTest {
 
     @Test
     fun errorState_showsDifferentialMessage() {
-        setContent(ReaderUiState(loading = false, error = "epub 缺少 OPF 描述文件，无法解析"))
+        setContent(ReaderUiState(loading = false, error = ReaderError.MissingOpf))
         composeRule.onNodeWithText("epub 缺少 OPF 描述文件，无法解析").assertIsDisplayed()
     }
 }

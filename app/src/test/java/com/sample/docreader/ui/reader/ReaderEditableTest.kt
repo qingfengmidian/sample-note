@@ -13,6 +13,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
@@ -21,6 +22,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = "zh")
 class ReaderEditableTest {
 
     @get:Rule
@@ -48,7 +50,7 @@ class ReaderEditableTest {
         setContent(editable = false)
 
         composeRule.onNodeWithContentDescription("菜单").performClick()
-        composeRule.onNodeWithText(EDIT_HINT_TOO_LARGE).assertExists().assertIsNotEnabled()
+        composeRule.onNodeWithText("编辑（文件超过 2MB，仅可只读）").assertExists().assertIsNotEnabled()
     }
 
     /** TC-F3-09：正常小文件编辑菜单项可点，且无置灰说明 */
@@ -58,6 +60,6 @@ class ReaderEditableTest {
 
         composeRule.onNodeWithContentDescription("菜单").performClick()
         composeRule.onNodeWithText("编辑").assertExists().assertIsEnabled()
-        composeRule.onNodeWithText(EDIT_HINT_TOO_LARGE).assertDoesNotExist()
+        composeRule.onNodeWithText("编辑（文件超过 2MB，仅可只读）").assertDoesNotExist()
     }
 }

@@ -33,7 +33,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(qualifiers = "night")
+@Config(qualifiers = "night zh")
 class ReaderPanelAccentTest {
 
     @get:Rule

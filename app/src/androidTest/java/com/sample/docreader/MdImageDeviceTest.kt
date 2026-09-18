@@ -1,5 +1,6 @@
 package com.sample.docreader
 
+import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sample.docreader.ui.reader.READER_CONTENT_TAG
 import org.junit.Rule
@@ -36,9 +38,11 @@ class MdImageDeviceTest {
     @get:Rule
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
+    private val uiContext: Context get() = ApplicationProvider.getApplicationContext()
+
     /** 首页顶栏「测试样本」→ 夹具列表逐页上滑直到目标 epub 行可见并点击 */
     private fun openEpubFixture(name: String) {
-        composeTestRule.onNodeWithText("测试样本").performClick()
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.home_fixtures_cd)).performClick()
         composeTestRule.waitForIdle()
         // M12 真机复盘（2026-09-12）：swipeUp 的 fling 会过冲跳过目标条目且只上滑不回退，
         // 尾部夹具（sample_*/styled）间歇性「未找到」；改 performScrollToNode 语义确定性滚动
@@ -93,8 +97,8 @@ class MdImageDeviceTest {
         composeTestRule.onNodeWithContentDescription("示例JPG插图").assertIsDisplayed()
 
         // svg 一律不直接渲染 → 占位（无 alt，默认占位文案 + 语义），不崩溃
-        scrollUntilContentDescription("图片无法显示")
-        composeTestRule.onNodeWithContentDescription("图片无法显示").assertIsDisplayed()
+        scrollUntilContentDescription(uiContext.getString(R.string.reader_image_unavailable))
+        composeTestRule.onNodeWithContentDescription(uiContext.getString(R.string.reader_image_unavailable)).assertIsDisplayed()
 
         // L3：文件名含空格、src 用 %20 编码的位图 → URLDecoder 查找后正常解码显示（contentDescription=alt）
         scrollUntilContentDescription("空格文件名图")
@@ -112,9 +116,9 @@ class MdImageDeviceTest {
     @Test
     fun sampleCover_coverShownAtTop() {
         openEpubFixture("sample_cover.epub")
-        waitForContentDescription("封面")
-        scrollUntilContentDescription("封面")
-        val cover = composeTestRule.onNodeWithContentDescription("封面")
+        waitForContentDescription(uiContext.getString(R.string.reader_image_cover))
+        scrollUntilContentDescription(uiContext.getString(R.string.reader_image_cover))
+        val cover = composeTestRule.onNodeWithContentDescription(uiContext.getString(R.string.reader_image_cover))
         cover.assertIsDisplayed()
         // 封面位于正文之上（首段文字可见，未被吞掉）
         waitForText("封面之后的第一段文字。")
@@ -135,8 +139,8 @@ class MdImageDeviceTest {
         composeTestRule.onNodeWithContentDescription("失联配图").assertIsDisplayed()
 
         // 截断位图（无 alt）：默认占位文案语义
-        scrollUntilContentDescription("图片无法显示")
-        composeTestRule.onNodeWithContentDescription("图片无法显示").assertIsDisplayed()
+        scrollUntilContentDescription(uiContext.getString(R.string.reader_image_unavailable))
+        composeTestRule.onNodeWithContentDescription(uiContext.getString(R.string.reader_image_unavailable)).assertIsDisplayed()
 
         // 正文完整可读：末尾段滚动到可视后仍在
         scrollUntilText("正文结尾段。")

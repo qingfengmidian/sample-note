@@ -18,6 +18,7 @@ import com.sample.docreader.core.parse.ParserFactory
 import com.sample.docreader.core.parse.PlainTextParser
 import com.sample.docreader.core.parse.TxtParser
 import com.sample.docreader.core.settings.SettingsRepository
+import com.sample.docreader.ui.reader.ReaderError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -78,7 +79,7 @@ class EditorViewModel(
     var loading by mutableStateOf(false)
         private set
 
-    var error by mutableStateOf<String?>(null)
+    var error by mutableStateOf<ReaderError?>(null)
         private set
 
     /** 编辑器样式与阅读界面共享同一套 ReadingSettings（F3.3） */
@@ -141,12 +142,12 @@ class EditorViewModel(
                 resetHistory(text)
                 restoreDraftIfAny(uri, text)
             } catch (e: ParseException) {
-                error = e.message
+                error = ReaderError.from(e)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // 文件读不到（被移动/删除等）统一按无权限提示，与阅读页一致
-                error = ParseException.NoPermission().message
+                error = ReaderError.NoPermission
             } finally {
                 loading = false
             }

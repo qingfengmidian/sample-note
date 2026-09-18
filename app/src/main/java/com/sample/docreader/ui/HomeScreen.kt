@@ -32,6 +32,7 @@ import android.net.Uri
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -40,11 +41,13 @@ import com.sample.docreader.BuildConfig
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.sample.docreader.R
 import com.sample.docreader.core.io.DraftStore
 import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.recent.AppDatabase
 import com.sample.docreader.core.recent.RecentFile
 import com.sample.docreader.core.recent.RecentFilesRepository
+import com.sample.docreader.ui.home.HomeMessage
 import com.sample.docreader.ui.home.HomeViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -66,12 +69,20 @@ fun HomeScreen(
     onViewUriConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    // M14（F4.6）：多处复用的本地化文案（打开/新建/删除）
+    val openFileLabel = stringResource(R.string.home_open_file)
+    val newFileLabel = stringResource(R.string.home_new_file)
+    val newMarkdownCd = stringResource(R.string.home_new_markdown_cd)
+    val newPlaintextCd = stringResource(R.string.home_new_plaintext_cd)
+    // M14（F4.6）：无显示名兜底（VM 无 Context，经构造注入本地化实现；英文 Untitled / 中文 未命名）
+    val untitledBase = stringResource(R.string.home_untitled_base)
     val viewModel: HomeViewModel = viewModel(factory = viewModelFactory {
         initializer {
             HomeViewModel(
                 RecentFilesRepository(AppDatabase.get(context.applicationContext)),
                 context.contentResolver,
-                DraftStore(context.filesDir)
+                DraftStore(context.filesDir),
+                defaultDisplayName = { ext -> if (ext.isNullOrBlank()) untitledBase else "$untitledBase.$ext" }
             )
         }
     })
@@ -92,8 +103,20 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(state.message) {
-        state.message?.let {
+    // M14（T3）：一次性提示类型 → 本地化文案（snackbar 只消费字符串）
+    val messageText = state.message?.let { msg ->
+        when (msg) {
+            is HomeMessage.UnsupportedFormat ->
+                msg.name?.let { stringResource(R.string.home_error_unsupported_format, it) }
+                    ?: stringResource(R.string.reader_error_unsupported_format)
+            HomeMessage.RemovedInaccessible -> stringResource(R.string.home_error_removed)
+            HomeMessage.CreateFailed -> stringResource(R.string.home_error_create_failed)
+            HomeMessage.OpenFailed -> stringResource(R.string.home_error_open_failed)
+            HomeMessage.ProviderNotRunning -> stringResource(R.string.home_error_provider_not_running)
+        }
+    }
+    LaunchedEffect(messageText) {
+        messageText?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.consumeMessage()
         }
@@ -121,14 +144,14 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("简易文档") },
+                title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     // U6（M10）：测试样本入口仅 debug 构建显示（fixtures 路由已按 BuildConfig.DEBUG 注册，
                     // release 下按钮不门控会点到死路由）；Robolectric 单测跑 debug 变体，门控不影响现有 fixtures 测试
                     if (BuildConfig.DEBUG) {
-                        TextButton(onClick = onOpenFixtures) { Text("测试样本") }
+                        TextButton(onClick = onOpenFixtures) { Text(stringResource(R.string.home_fixtures_cd)) }
                     }
-                    TextButton(onClick = onOpenSettings) { Text("设置") }
+                    TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.home_settings_cd)) }
                 }
             )
         },
@@ -149,7 +172,7 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "暂无最近文件，点击下方\"打开文件\"选择文档",
+                        stringResource(R.string.home_empty_hint),
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Button(
@@ -157,14 +180,14 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = 48.dp)
-                            .semantics { contentDescription = "打开文件" }
+                            .semantics { contentDescription = openFileLabel }
                     ) {
-                        Text("打开文件")
+                        Text(openFileLabel)
                     }
                 }
             } else {
                 Text(
-                    "最近打开",
+                    stringResource(R.string.home_recent_title),
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
@@ -183,7 +206,7 @@ fun HomeScreen(
                                 .fillMaxWidth()
                                 .defaultMinSize(minHeight = 48.dp)
                         ) {
-                            Text("清空最近列表")
+                            Text(stringResource(R.string.home_clear_recent))
                         }
                     }
                 }
@@ -197,7 +220,7 @@ fun HomeScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .defaultMinSize(minHeight = 48.dp)
                 ) {
-                    Text("打开文件")
+                    Text(openFileLabel)
                 }
             }
             // 新建文件入口（F3.5/TC-F3-08）：选择 md/txt 后由系统选择器命名
@@ -207,9 +230,9 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .defaultMinSize(minHeight = 48.dp)
-                    .semantics { contentDescription = "新建文件" }
+                    .semantics { contentDescription = newFileLabel }
             ) {
-                Text("新建文件")
+                Text(newFileLabel)
             }
         }
     }
@@ -217,32 +240,32 @@ fun HomeScreen(
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            title = { Text("新建文件") },
+            title = { Text(newFileLabel) },
             text = {
                 Column {
                     TextButton(
                         onClick = {
                             showCreateDialog = false
-                            createMdLauncher.launch("未命名.md")
+                            createMdLauncher.launch(context.getString(R.string.home_untitled_md))
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = 48.dp)
-                            .semantics { contentDescription = "新建 Markdown" }
+                            .semantics { contentDescription = newMarkdownCd }
                     ) {
-                        Text("Markdown（.md）")
+                        Text(stringResource(R.string.home_new_markdown))
                     }
                     TextButton(
                         onClick = {
                             showCreateDialog = false
-                            createTxtLauncher.launch("未命名.txt")
+                            createTxtLauncher.launch(context.getString(R.string.home_untitled_txt))
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = 48.dp)
-                            .semantics { contentDescription = "新建纯文本" }
+                            .semantics { contentDescription = newPlaintextCd }
                     ) {
-                        Text("纯文本（.txt）")
+                        Text(stringResource(R.string.home_new_plaintext))
                     }
                 }
             },
@@ -268,7 +291,7 @@ private fun RecentFileRow(item: RecentFile, onOpen: () -> Unit, onRemove: () -> 
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        TextButton(onClick = onRemove) { Text("删除") }
+        TextButton(onClick = onRemove) { Text(stringResource(R.string.common_delete)) }
     }
 }
 

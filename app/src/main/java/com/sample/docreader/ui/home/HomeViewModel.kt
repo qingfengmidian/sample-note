@@ -24,10 +24,31 @@ import java.io.FileNotFoundException
 /** 阅读入口导航目标：uri、显示名与已嗅探出的格式经路由传入 ReaderScreen */
 data class OpenTarget(val uri: String, val name: String, val format: DocFormat)
 
+/**
+ * M14（F4.6，T3）首页一次性提示类型：VM 只传事件类型（可携带数据），
+ * UI 经 `stringResource` 映射文案，避免中文硬编码在 VM 层。
+ */
+sealed interface HomeMessage {
+    /** 嗅探到不支持的文件格式（name 为显示名，可空） */
+    data class UnsupportedFormat(val name: String?) : HomeMessage
+
+    /** 最近文件持久权限失效，已从列表移除 */
+    data object RemovedInaccessible : HomeMessage
+
+    /** 新建文件失败：所选位置不可访问 */
+    data object CreateFailed : HomeMessage
+
+    /** 打开文件失败：权限不足或文件已被移动/删除 */
+    data object OpenFailed : HomeMessage
+
+    /** 云盘 Provider 未运行（异常消息含 "No content provider"） */
+    data object ProviderNotRunning : HomeMessage
+}
+
 /** 首页状态（设计§4.1：最近列表 + 打开入口 + 一次性提示/导航事件） */
 data class HomeUiState(
     val recent: List<RecentFile> = emptyList(),
-    val message: String? = null,
+    val message: HomeMessage? = null,
     val openTarget: OpenTarget? = null,
     /** 新建文件（F3.5/TC-F3-08）导航目标：指向编辑器而非阅读器 */
     val editTarget: OpenTarget? = null
@@ -41,7 +62,15 @@ data class HomeUiState(
 class HomeViewModel(
     private val recentRepository: RecentFilesRepository,
     private val resolver: ContentResolver,
-    private val draftStore: DraftStore? = null
+    private val draftStore: DraftStore? = null,
+    /**
+     * M14（F4.6）：无显示名时的兜底显示名（VM 无 Context 不能自读资源，由 UI 注入本地化实现）。
+     * ext 为扩展名（md/txt）；null = 无扩展名上下文（打开任意文件的兜底）。
+     * 默认值保持中文，使不传该参的既有纯 VM 测试断言（「未命名.txt」）零改动。
+     */
+    private val defaultDisplayName: (String?) -> String = { ext ->
+        if (ext.isNullOrBlank()) "未命名" else "未命名.$ext"
+    }
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -74,14 +103,14 @@ class HomeViewModel(
                         ?: throw UnsupportedFormatException(displayName)
                     // 格式确认支持后才取持久授权；重复打开同一 uri 重复调用是幂等安全的
                     takePersistableReadPermission(uri)
-                    val name = displayName ?: uri.lastPathSegment ?: "未命名"
+                    val name = displayName ?: uri.lastPathSegment ?: defaultDisplayName(null)
                     recentRepository.touch(uri.toString(), name, format)
                     _uiState.update {
                         it.copy(openTarget = OpenTarget(uri.toString(), name, format))
                     }
                 }
             } catch (e: UnsupportedFormatException) {
-                _uiState.update { it.copy(message = e.message) }
+                _uiState.update { it.copy(message = HomeMessage.UnsupportedFormat(e.displayName)) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -103,7 +132,7 @@ class HomeViewModel(
             } catch (e: SecurityException) {
                 // 持久权限已失效（文件被移动/删除/Provider 撤销授权）：移出列表并提示
                 recentRepository.remove(item.uri)
-                _uiState.update { it.copy(message = "无法访问该文件，已从最近列表移除") }
+                _uiState.update { it.copy(message = HomeMessage.RemovedInaccessible) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -122,8 +151,8 @@ class HomeViewModel(
             try {
                 withContext(Dispatchers.IO) {
                     takePersistableWritePermission(uri)
-                    val name = queryDisplayName(uri)
-                        ?: "未命名.${if (format == DocFormat.MD) "md" else "txt"}"
+                    val ext = if (format == DocFormat.MD) "md" else "txt"
+                    val name = queryDisplayName(uri) ?: defaultDisplayName(ext)
                     recentRepository.touch(uri.toString(), name, format)
                     _uiState.update {
                         it.copy(editTarget = OpenTarget(uri.toString(), name, format))
@@ -132,7 +161,7 @@ class HomeViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(message = "新建文件失败：无法访问所选位置") }
+                _uiState.update { it.copy(message = HomeMessage.CreateFailed) }
             }
         }
     }
@@ -195,14 +224,14 @@ class HomeViewModel(
         }
     }
 
-    private fun openErrorMessage(e: Exception): String =
+    private fun openErrorMessage(e: Exception): HomeMessage =
         if (e is FileNotFoundException && (e.message ?: "").contains("No content provider")) {
-            "文件提供方（如云盘应用）未运行，请启动对应应用后重试"
+            HomeMessage.ProviderNotRunning
         } else {
-            "无法打开文件：权限不足或文件已被移动/删除"
+            HomeMessage.OpenFailed
         }
 
-    private class UnsupportedFormatException(displayName: String?) :
+    private class UnsupportedFormatException(val displayName: String?) :
         Exception("不支持的文件格式${displayName?.let { "：$it" } ?: ""}")
 
     companion object {

@@ -15,7 +15,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.sample.docreader.R
 
 /**
  * M3 极简 fixtures 选择入口：列出 debug assets fixtures 中的 txt/md/xml/epub，点击进入阅读界面。
@@ -34,7 +36,7 @@ fun FixtureEntryScreen(onOpenFixture: (String) -> Unit, onOpenSettings: () -> Un
             .sorted()
     }
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("测试样本（M3 开发入口）", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.fixture_title), style = MaterialTheme.typography.titleMedium)
         LazyColumn(modifier = Modifier.weight(1f).padding(top = 8.dp)) {
             items(fixtures) { name ->
                 Text(
@@ -51,7 +53,7 @@ fun FixtureEntryScreen(onOpenFixture: (String) -> Unit, onOpenSettings: () -> Un
             onClick = onOpenSettings,
             modifier = Modifier.defaultMinSize(minHeight = 48.dp)
         ) {
-            Text("设置")
+            Text(stringResource(R.string.home_settings_cd))
         }
     }
 }

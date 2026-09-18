@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
@@ -76,6 +77,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.sample.docreader.R
 import com.sample.docreader.core.io.DelegatingFileOpener
 import com.sample.docreader.core.io.EpubCache
 import com.sample.docreader.core.model.DocFormat
@@ -104,17 +106,15 @@ import java.io.File
  * epub 章节面板升级为 ModalBottomSheet 并内置上一章/下一章翻章。**不常驻底部工具条**。
  */
 
-/** 超大文件（>2MB）编辑入口置灰说明文字（TC-F3-09，设计§8） */
-const val EDIT_HINT_TOO_LARGE = "编辑（文件超过 2MB，仅可只读）"
-
-/** G1（F2.6）：手动编码覆盖可选项（charset 名，null = 自动探测）；仅 txt 显示 */
-internal val ENCODING_OPTIONS: List<Pair<String?, String>> = listOf(
-    null to "自动探测",
-    "UTF-8" to "UTF-8",
-    "UTF-16LE" to "UTF-16LE",
-    "UTF-16BE" to "UTF-16BE",
-    "GBK" to "GBK",
-    "ISO-8859-1" to "Latin-1"
+/** G1（F2.6）：手动编码覆盖可选项（charset 名，null = 自动探测）；仅 txt 显示。
+ *  M14（F4.6）：null（自动探测）标签在渲染处经 stringResource 本地化。 */
+internal val ENCODING_OPTIONS: List<String?> = listOf(
+    null,
+    "UTF-8",
+    "UTF-16LE",
+    "UTF-16BE",
+    "GBK",
+    "ISO-8859-1"
 )
 
 @Composable
@@ -164,11 +164,11 @@ fun ReaderScreen(
             fontImportMessage = null
             val result = withContext(Dispatchers.IO) {
                 runCatching { importCustomFont(context, picked) }
-                    .getOrElse { e -> FontImportResult(failure = e.message ?: "导入失败") }
+                    .getOrElse { FontImportResult(failure = context.getString(R.string.reader_font_import_failed)) }
             }
             if (result.path != null) {
                 viewModel.applyCustomFont(result.path)
-                fontImportMessage = "自定义字体已导入"
+                fontImportMessage = context.getString(R.string.reader_font_imported)
             } else {
                 fontImportMessage = result.failure
             }
@@ -251,6 +251,8 @@ fun ReaderContent(
 ) {
     val settings = state.settings
     val theme = resolveReadingTheme(settings.theme)
+    // M14（F4.6）：错误态返回操作文案（错误态分支与顶栏共用同一本地化值）
+    val backLabel = stringResource(R.string.common_back_cd)
     // M13（F4.4/F4.5）：面板/菜单强调色随阅读主题（对 theme.background 对比度 ≥4.5:1），不取 colorScheme
     val accent = theme.foreground
     val document = state.document
@@ -431,25 +433,25 @@ fun ReaderContent(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 actions = {
                     // F4.5/F2.16：epub 章节/目录入口上移顶栏图标；文件无目录（toc 空）时隐藏，不做生成式兜底
                     if (isEpub && toc.isNotEmpty()) {
                         IconButton(onClick = { chapterSheetOpen = true }) {
-                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "章节列表")
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.reader_chapters_cd))
                         }
                     }
                     // F2.13（TC-F2-20b）：md 目录入口与 epub 章节同位置；toc 为空时隐藏
                     if (isMd && toc.isNotEmpty()) {
                         IconButton(onClick = { tocSheetOpen = true }) {
-                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "目录")
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.reader_toc_cd))
                         }
                     }
                     var menuOpen by remember { mutableStateOf(false) }
                     IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "菜单")
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.reader_menu_cd))
                     }
                     // M13（F4.4/F4.5）：菜单容器/文字/禁用态随阅读主题（不取 colorScheme，避免明暗错配）
                     DropdownMenu(
@@ -459,7 +461,7 @@ fun ReaderContent(
                     ) {
                         if (isMd) {
                             DropdownMenuItem(
-                                text = { Text(if (mdPreview) "源码" else "预览") },
+                                text = { Text(if (mdPreview) stringResource(R.string.reader_menu_source) else stringResource(R.string.reader_menu_preview)) },
                                 colors = MenuDefaults.itemColors(
                                     textColor = theme.foreground,
                                     disabledTextColor = theme.foreground.copy(alpha = 0.38f)
@@ -481,7 +483,12 @@ fun ReaderContent(
                         // 超出可编辑上限（>2MB，ReaderViewModel.MAX_EDITABLE_BYTES）置灰并附说明，仅可只读浏览（TC-F3-09，设计§8）
                         if (isMd || isTxt) {
                             DropdownMenuItem(
-                                text = { Text(if (state.editable) "编辑" else EDIT_HINT_TOO_LARGE) },
+                                text = {
+                                    Text(
+                                        if (state.editable) stringResource(R.string.reader_menu_edit)
+                                        else stringResource(R.string.reader_edit_too_large)
+                                    )
+                                },
                                 enabled = state.editable,
                                 colors = MenuDefaults.itemColors(
                                     textColor = theme.foreground,
@@ -495,7 +502,7 @@ fun ReaderContent(
                         }
                         // F4.4：阅读设置入口——唤起 ModalBottomSheet 设置面板
                         DropdownMenuItem(
-                            text = { Text("阅读设置") },
+                            text = { Text(stringResource(R.string.reader_menu_settings)) },
                             colors = MenuDefaults.itemColors(
                                 textColor = theme.foreground,
                                 disabledTextColor = theme.foreground.copy(alpha = 0.38f)
@@ -524,7 +531,7 @@ fun ReaderContent(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(state.error.orEmpty(), color = theme.foreground)
+                    Text(readerErrorText(state.error), color = theme.foreground)
                     TextButton(
                         onClick = onBack,
                         colors = ButtonDefaults.textButtonColors(
@@ -533,8 +540,8 @@ fun ReaderContent(
                         ),
                         modifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                            .semantics { contentDescription = "返回" }
-                    ) { Text("返回") }
+                            .semantics { contentDescription = backLabel }
+                    ) { Text(backLabel) }
                 }
                 // 加载中：document 为 null 且无错误（避免 0 章 epub 误判为加载中而永久转圈）
                 state.loading || state.document == null ->
@@ -546,7 +553,7 @@ fun ReaderContent(
                 // M3：某章 images 非空（纯图章，解析层已合成空宿主段落）时不得判空——需渲染图片；
                 // F4.7 连续滚动下空态判定上移到整本（isEmptyDoc），真正无图真空章仍走既有空态。
                 isEmptyDoc -> Text(
-                    "文件为空",
+                    stringResource(R.string.reader_empty),
                     color = theme.foreground,
                     modifier = Modifier.align(Alignment.Center)
                 )
@@ -696,7 +703,7 @@ internal fun ChapterSheetContent(
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Text(
-            "章节",
+            stringResource(R.string.reader_chapters_title),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(vertical = 8.dp)
         )
@@ -705,6 +712,8 @@ internal fun ChapterSheetContent(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            val prevLabel = stringResource(R.string.reader_prev_chapter)
+            val nextLabel = stringResource(R.string.reader_next_chapter)
             TextButton(
                 onClick = onPrev,
                 enabled = prevEnabled,
@@ -715,8 +724,8 @@ internal fun ChapterSheetContent(
                 modifier = Modifier
                     .weight(1f)
                     .defaultMinSize(minHeight = 48.dp)
-                    .semantics { contentDescription = "上一章" }
-            ) { Text("上一章") }
+                    .semantics { contentDescription = prevLabel }
+            ) { Text(prevLabel) }
             TextButton(
                 onClick = onNext,
                 enabled = nextEnabled,
@@ -727,8 +736,8 @@ internal fun ChapterSheetContent(
                 modifier = Modifier
                     .weight(1f)
                     .defaultMinSize(minHeight = 48.dp)
-                    .semantics { contentDescription = "下一章" }
-            ) { Text("下一章") }
+                    .semantics { contentDescription = nextLabel }
+            ) { Text(nextLabel) }
         }
     }
 }
@@ -776,17 +785,17 @@ internal fun ReaderSettingsSheetContent(
             .padding(bottom = 24.dp)
     ) {
         // ---- 排版组：换行模式（分段选择）/ 字号（A- A+）/ 行距（单选）/ 编码（G1，仅 txt） ----
-        Text("排版", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+        Text(stringResource(R.string.reader_layout), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
             SheetRadioOption(
-                label = "自动换行",
+                label = stringResource(R.string.reader_auto_wrap),
                 selected = settings.wrapMode == WrapMode.WRAP,
                 accent = accent,
                 onClick = { onSelectWrapMode(WrapMode.WRAP) },
                 modifier = Modifier.weight(1f)
             )
             SheetRadioOption(
-                label = "不换行",
+                label = stringResource(R.string.reader_no_wrap),
                 selected = settings.wrapMode == WrapMode.NO_WRAP,
                 accent = accent,
                 onClick = { onSelectWrapMode(WrapMode.NO_WRAP) },
@@ -794,11 +803,13 @@ internal fun ReaderSettingsSheetContent(
             )
         }
         // 字号：A- / 当前值 sp / A+（档位与端点 clamp 见 ReaderViewModel.stepFontSize）
+        val decreaseFontSizeLabel = stringResource(R.string.reader_decrease_font_size)
+        val increaseFontSizeLabel = stringResource(R.string.reader_increase_font_size)
         Row(
             modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("字号", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.reader_font_size), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Text("${settings.fontSizeSp}sp", style = MaterialTheme.typography.bodyMedium)
             TextButton(
                 onClick = { onFontSizeStep(-1) },
@@ -808,7 +819,7 @@ internal fun ReaderSettingsSheetContent(
                 ),
                 modifier = Modifier
                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                    .semantics { contentDescription = "减小字号" }
+                    .semantics { contentDescription = decreaseFontSizeLabel }
             ) { Text("A-") }
             TextButton(
                 onClick = { onFontSizeStep(1) },
@@ -818,13 +829,13 @@ internal fun ReaderSettingsSheetContent(
                 ),
                 modifier = Modifier
                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                    .semantics { contentDescription = "增大字号" }
+                    .semantics { contentDescription = increaseFontSizeLabel }
             ) { Text("A+") }
         }
         // 行距单选（U3：不再循环）：120/150/180/200%
         ReaderViewModel.LINE_HEIGHT_STEPS.forEach { percent ->
             SheetRadioOption(
-                label = "行距 $percent%",
+                label = stringResource(R.string.reader_line_spacing, percent),
                 selected = settings.lineHeightPercent == percent,
                 accent = accent,
                 onClick = { onSelectLineHeight(percent) }
@@ -832,10 +843,10 @@ internal fun ReaderSettingsSheetContent(
         }
         // G1（F2.6）：编码手动切换，仅 txt 显示；自动探测时无额外探测结果展示
         if (isTxt) {
-            Text("编码", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 4.dp))
-            ENCODING_OPTIONS.forEach { (charsetName, label) ->
+            Text(stringResource(R.string.reader_encoding), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 4.dp))
+            ENCODING_OPTIONS.forEach { charsetName ->
                 SheetRadioOption(
-                    label = label,
+                    label = encodingLabel(charsetName),
                     selected = encodingOverride == charsetName,
                     accent = accent,
                     onClick = { onSelectEncoding(charsetName) }
@@ -844,7 +855,8 @@ internal fun ReaderSettingsSheetContent(
         }
 
         // ---- 字体组（U3 单选）：代码 / 衬线 / 无衬线 / 自定义（仅 customFontPath 非空时出现）+ 导入字体 ----
-        Text("字体", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+        Text(stringResource(R.string.reader_font), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+        val importFontCd = stringResource(R.string.reader_import_font_cd)
         val fontOptions = buildList {
             add(ReaderFont.CODE)
             add(ReaderFont.SERIF)
@@ -868,17 +880,17 @@ internal fun ReaderSettingsSheetContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 48.dp)
-                .semantics { contentDescription = "导入字体" }
-        ) { Text("导入自定义字体（ttf/otf）") }
+                .semantics { contentDescription = importFontCd }
+        ) { Text(stringResource(R.string.reader_import_font)) }
         fontImportMessage?.let {
             Text(it, style = MaterialTheme.typography.bodySmall)
         }
 
         // ---- 主题组（U3 单选，色块 + 文字，选中勾） ----
-        Text("主题", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
-        THEME_OPTIONS.forEach { (value, label) ->
+        Text(stringResource(R.string.reader_theme), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+        THEME_OPTIONS.forEach { value ->
             SheetRadioOption(
-                label = label,
+                label = themeLabel(value),
                 selected = settings.theme == value,
                 accent = accent,
                 onClick = { onSelectTheme(value) },
@@ -900,13 +912,31 @@ internal fun ReaderSettingsSheetContent(
 }
 
 /** 主题单选项（null = 跟随系统） */
-private val THEME_OPTIONS: List<Pair<ReadingTheme?, String>> = listOf(
-    null to "跟随系统",
-    ReadingTheme.DEFAULT to "默认白",
-    ReadingTheme.EYE_CARE to "护眼绿",
-    ReadingTheme.SOFT_LIGHT to "柔光米黄",
-    ReadingTheme.NIGHT to "夜间黑"
+private val THEME_OPTIONS: List<ReadingTheme?> = listOf(
+    null,
+    ReadingTheme.DEFAULT,
+    ReadingTheme.EYE_CARE,
+    ReadingTheme.SOFT_LIGHT,
+    ReadingTheme.NIGHT
 )
+
+/** 编码单选项标签：null → 自动探测；ISO-8859-1 沿用旧显示名 Latin-1（M14 仅本地化自动探测项） */
+@Composable
+private fun encodingLabel(charsetName: String?): String = when (charsetName) {
+    null -> stringResource(R.string.reader_encoding_auto)
+    "ISO-8859-1" -> "Latin-1"
+    else -> charsetName
+}
+
+/** 主题标签（null = 跟随系统） */
+@Composable
+private fun themeLabel(theme: ReadingTheme?): String = when (theme) {
+    null -> stringResource(R.string.reader_theme_system)
+    ReadingTheme.DEFAULT -> stringResource(R.string.reader_theme_default)
+    ReadingTheme.EYE_CARE -> stringResource(R.string.reader_theme_eye_care)
+    ReadingTheme.SOFT_LIGHT -> stringResource(R.string.reader_theme_soft)
+    ReadingTheme.NIGHT -> stringResource(R.string.reader_theme_night)
+}
 
 /**
  * 面板单选项（U3）：Modifier.selectable + RadioButton 角色（自带 selected 语义）+ stateDescription，
@@ -923,12 +953,14 @@ private fun SheetRadioOption(
 ) {
     // M13：强调色取阅读主题前景色（[accent]），语义键必须与绘制使用同一局部值
     val markColor = accent
+    val selectedState = stringResource(R.string.common_state_selected)
+    val unselectedState = stringResource(R.string.common_state_unselected)
     Row(
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
             .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
             .semantics {
-                stateDescription = if (selected) "已选中" else "未选中"
+                stateDescription = if (selected) selectedState else unselectedState
                 if (selected) this[ReaderPanelAccentColorKey] = markColor
             }
             .padding(horizontal = 8.dp),
@@ -955,7 +987,7 @@ internal fun TocSheetContent(
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Text(
-            "目录",
+            stringResource(R.string.reader_toc_title),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(vertical = 8.dp)
         )
@@ -1003,9 +1035,10 @@ internal fun TocListContent(
     }
 }
 
+@Composable
 private fun fontLabel(font: ReaderFont): String = when (font) {
-    ReaderFont.CODE -> "代码"
-    ReaderFont.SERIF -> "衬线"
-    ReaderFont.SANS -> "无衬线"
-    ReaderFont.CUSTOM -> "自定义"
+    ReaderFont.CODE -> stringResource(R.string.reader_font_code)
+    ReaderFont.SERIF -> stringResource(R.string.reader_font_serif)
+    ReaderFont.SANS -> stringResource(R.string.reader_font_sans)
+    ReaderFont.CUSTOM -> stringResource(R.string.reader_font_custom)
 }

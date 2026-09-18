@@ -1,5 +1,6 @@
 package com.sample.docreader
 
+import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sample.docreader.ui.reader.READER_CONTENT_TAG
 import org.junit.Rule
@@ -30,9 +32,11 @@ class MdCssDeviceTest {
     @get:Rule
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
+    private val uiContext: Context get() = ApplicationProvider.getApplicationContext()
+
     /** 首页顶栏「测试样本」→ 夹具列表逐页上滑直到目标 epub 行可见并点击 */
     private fun openEpubFixture(name: String) {
-        composeTestRule.onNodeWithText("测试样本").performClick()
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.home_fixtures_cd)).performClick()
         composeTestRule.waitForIdle()
         // M12 真机复盘（2026-09-12）：swipeUp 的 fling 会过冲跳过目标条目且只上滑不回退，
         // 尾部夹具（sample_*/styled）间歇性「未找到」；改 performScrollToNode 语义确定性滚动

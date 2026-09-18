@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sample.docreader.R
 import com.sample.docreader.core.model.ParagraphImage
 import com.sample.docreader.core.model.ParagraphStyleHints
 import com.sample.docreader.core.model.ReaderFont
@@ -287,7 +289,8 @@ internal fun ChapterImage(
     imageVerticalPad: Dp
 ) {
     val alt = image.alt?.takeIf { it.isNotBlank() }
-    val placeholderDesc = alt ?: "图片无法显示"
+    val unavailable = stringResource(R.string.reader_image_unavailable)
+    val placeholderDesc = alt ?: unavailable
     val resolvedFile = resolveImageFile(image, imageRoot)
     // svg 一律不直接渲染；缓存不可用/文件缺失 → 占位（不触发解码）
     if (image.src.endsWith(".svg", ignoreCase = true) || resolvedFile == null) {
@@ -313,7 +316,7 @@ internal fun ChapterImage(
         return
     }
     // 无 alt 的图给通用语义（封面给"封面"），见需求 F2.14/S9
-    val description = alt ?: if (image.isCover) "封面" else "图片"
+    val description = alt ?: if (image.isCover) stringResource(R.string.reader_image_cover) else stringResource(R.string.reader_image_generic)
     val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
     Image(
         bitmap = bitmap.asImageBitmap(),
@@ -389,7 +392,7 @@ internal fun ImagePlaceholder(
                 tint = foreground,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
-            Text(alt ?: "图片无法显示", color = foreground)
+            Text(alt ?: stringResource(R.string.reader_image_unavailable), color = foreground)
         }
     }
 }

@@ -29,10 +29,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sample.docreader.R
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
@@ -66,14 +68,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     importCustomFont(context, uri)
-                }.getOrElse { e -> FontImportResult(failure = e.message ?: "导入失败") }
+                }.getOrElse { FontImportResult(failure = context.getString(R.string.reader_font_import_failed)) }
             }
             if (result.path != null) {
                 // G2（M10）：重新导入成功后删除上一版旧字体文件（孤儿文件清理）；切换离开 CUSTOM 不删（允许切回）
                 val oldPath = settings.customFontPath
                 repository.save(settings.copy(font = ReaderFont.CUSTOM, customFontPath = result.path))
                 if (oldPath != null && oldPath != result.path) File(oldPath).delete()
-                message = "自定义字体已导入"
+                message = context.getString(R.string.reader_font_imported)
             } else {
                 message = result.failure
             }
@@ -87,9 +89,9 @@ fun SettingsScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("设置") },
+                title = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("返回") }
+                    TextButton(onClick = onBack) { Text(stringResource(R.string.common_back_cd)) }
                 }
             )
         }
@@ -102,8 +104,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("字体方案", style = MaterialTheme.typography.titleSmall)
-            Text("当前：${fontLabel(settings.font)}", style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.settings_font_scheme), style = MaterialTheme.typography.titleSmall)
+            Text(
+                stringResource(R.string.settings_current, fontLabel(settings.font)),
+                style = MaterialTheme.typography.bodyMedium
+            )
             Button(
                 onClick = {
                     launcher.launch(
@@ -120,11 +125,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     .fillMaxWidth()
                     .defaultMinSize(minHeight = 48.dp)
             ) {
-                Text("导入自定义字体（ttf/otf）")
+                Text(stringResource(R.string.reader_import_font))
             }
             if (settings.font == ReaderFont.CUSTOM) {
                 Text(
-                    "已启用自定义字体${settings.customFontPath?.let { "：${File(it).name}" } ?: ""}",
+                    settings.customFontPath?.let {
+                        stringResource(R.string.settings_custom_font_enabled_named, File(it).name)
+                    } ?: stringResource(R.string.settings_custom_font_enabled),
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -133,7 +140,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             // 编辑器设置（F3.6/TC-F3-06/07）：自动保存开关，默认关，开启后停顿 3s 自动写回。
             // 置于阅读默认值之前：保持 M7c 起即有的屏幕内位置，避免 Robolectric 默认可视区外 performClick 失效
-            Text("编辑器", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.settings_editor_section), style = MaterialTheme.typography.titleSmall)
             AutoSaveRow(
                 checked = settings.autoSave,
                 onCheckedChange = { enabled ->
@@ -141,7 +148,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             )
             // 全局阅读默认项（F4.3/TC-F4-03，M8a）：档位逻辑与 ReaderViewModel 完全一致，即时持久化
-            Text("阅读默认值", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.settings_reading_defaults), style = MaterialTheme.typography.titleSmall)
             FontSizeSettingRow(
                 fontSizeSp = settings.fontSizeSp,
                 onStep = { delta ->
@@ -149,7 +156,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             )
             CycleSettingRow(
-                title = "默认行距",
+                title = stringResource(R.string.settings_default_line_spacing),
                 value = "${settings.lineHeightPercent}%",
                 onClick = {
                     scope.launch {
@@ -158,8 +165,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             )
             CycleSettingRow(
-                title = "默认换行模式",
-                value = if (settings.wrapMode == WrapMode.WRAP) "自动换行" else "不换行",
+                title = stringResource(R.string.settings_default_wrap_mode),
+                value = if (settings.wrapMode == WrapMode.WRAP) stringResource(R.string.reader_auto_wrap)
+                else stringResource(R.string.reader_no_wrap),
                 onClick = {
                     scope.launch {
                         repository.save(
@@ -171,7 +179,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             )
             CycleSettingRow(
-                title = "默认字体",
+                title = stringResource(R.string.settings_default_font),
                 value = fontLabel(settings.font),
                 onClick = {
                     // G2（M10）：customFontPath 非空时循环序列纳入 CUSTOM（与 ReaderViewModel.cycleFont 一致）
@@ -179,7 +187,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             )
             CycleSettingRow(
-                title = "默认阅读主题",
+                title = stringResource(R.string.settings_default_theme),
                 value = themeLabel(settings.theme),
                 onClick = { scope.launch { repository.save(settings.copy(theme = nextTheme(settings.theme))) } }
             )
@@ -193,6 +201,7 @@ fun SettingsScreen(onBack: () -> Unit) {
  */
 @Composable
 internal fun AutoSaveRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val autoSaveCd = stringResource(R.string.settings_auto_save_cd)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -200,16 +209,16 @@ internal fun AutoSaveRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("自动保存", style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.settings_auto_save), style = MaterialTheme.typography.bodyMedium)
             Text(
-                "编辑停顿 3 秒后自动写回文件（默认关闭）",
+                stringResource(R.string.settings_auto_save_desc),
                 style = MaterialTheme.typography.bodySmall
             )
         }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            modifier = Modifier.semantics { contentDescription = "自动保存开关" }
+            modifier = Modifier.semantics { contentDescription = autoSaveCd }
         )
     }
 }
@@ -230,23 +239,24 @@ internal fun importCustomFont(context: android.content.Context, uri: android.net
     val dir = File(context.filesDir, "fonts").apply { mkdirs() }
     val out = File(dir, "${UUID.randomUUID()}.$ext")
     val input = context.contentResolver.openInputStream(uri)
-        ?: return FontImportResult(failure = "无法读取所选文件")
+        ?: return FontImportResult(failure = context.getString(R.string.settings_font_read_failed))
     input.use { ins -> out.outputStream().use { os -> ins.copyTo(os) } }
 
     // Typeface.createFromFile 对无效字体抛异常；失败删除副本，避免残留垃圾文件
     val valid = runCatching { Typeface.createFromFile(out) }.isSuccess
     if (!valid) {
         out.delete()
-        return FontImportResult(failure = "字体文件无效，请选择有效的 ttf/otf")
+        return FontImportResult(failure = context.getString(R.string.settings_font_invalid))
     }
     return FontImportResult(path = out.absolutePath)
 }
 
+@Composable
 private fun fontLabel(font: ReaderFont): String = when (font) {
-    ReaderFont.CODE -> "代码风格（等宽）"
-    ReaderFont.SERIF -> "衬线"
-    ReaderFont.SANS -> "无衬线"
-    ReaderFont.CUSTOM -> "自定义"
+    ReaderFont.CODE -> stringResource(R.string.settings_font_code)
+    ReaderFont.SERIF -> stringResource(R.string.reader_font_serif)
+    ReaderFont.SANS -> stringResource(R.string.reader_font_sans)
+    ReaderFont.CUSTOM -> stringResource(R.string.reader_font_custom)
 }
 
 /**
@@ -255,25 +265,27 @@ private fun fontLabel(font: ReaderFont): String = when (font) {
  */
 @Composable
 private fun FontSizeSettingRow(fontSizeSp: Int, onStep: (Int) -> Unit) {
+    val decreaseCd = stringResource(R.string.settings_decrease_font_size_cd)
+    val increaseCd = stringResource(R.string.settings_increase_font_size_cd)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 48.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("默认字号", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(stringResource(R.string.settings_default_font_size), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
         Text("${fontSizeSp}sp", style = MaterialTheme.typography.bodyMedium)
         TextButton(
             onClick = { onStep(-1) },
             modifier = Modifier
                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                .semantics { contentDescription = "减小默认字号" }
+                .semantics { contentDescription = decreaseCd }
         ) { Text("A-") }
         TextButton(
             onClick = { onStep(1) },
             modifier = Modifier
                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                .semantics { contentDescription = "增大默认字号" }
+                .semantics { contentDescription = increaseCd }
         ) { Text("A+") }
     }
 }
@@ -297,7 +309,7 @@ private fun CycleSettingRow(title: String, value: String, onClick: () -> Unit) {
             modifier = Modifier
                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .semantics { contentDescription = title }
-        ) { Text("切换") }
+        ) { Text(stringResource(R.string.common_switch)) }
     }
 }
 
@@ -335,10 +347,11 @@ private fun nextTheme(current: ReadingTheme?): ReadingTheme? {
     return order[(order.indexOf(current) + 1).mod(order.size)]
 }
 
+@Composable
 private fun themeLabel(theme: ReadingTheme?): String = when (theme) {
-    null -> "跟随系统"
-    ReadingTheme.DEFAULT -> "默认白"
-    ReadingTheme.EYE_CARE -> "护眼绿"
-    ReadingTheme.SOFT_LIGHT -> "柔光米黄"
-    ReadingTheme.NIGHT -> "夜间黑"
+    null -> stringResource(R.string.reader_theme_system)
+    ReadingTheme.DEFAULT -> stringResource(R.string.reader_theme_default)
+    ReadingTheme.EYE_CARE -> stringResource(R.string.reader_theme_eye_care)
+    ReadingTheme.SOFT_LIGHT -> stringResource(R.string.reader_theme_soft)
+    ReadingTheme.NIGHT -> stringResource(R.string.reader_theme_night)
 }

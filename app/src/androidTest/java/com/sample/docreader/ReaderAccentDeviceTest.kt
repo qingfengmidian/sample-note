@@ -1,5 +1,6 @@
 package com.sample.docreader
 
+import android.content.Context
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollAction
@@ -11,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sample.docreader.core.model.ReadingTheme
 import com.sample.docreader.ui.reader.ReaderPanelAccentColorKey
@@ -32,9 +34,11 @@ class ReaderAccentDeviceTest {
     @get:Rule
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
+    private val uiContext: Context get() = ApplicationProvider.getApplicationContext()
+
     /** 首页顶栏 → 「测试样本」夹具入口；夹具列表为 LazyColumn，确定性滚动到目标行。 */
     private fun openFixture(name: String) {
-        composeTestRule.onNodeWithText("测试样本").performClick()
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.home_fixtures_cd)).performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText(name))
         composeTestRule.onNodeWithText(name).performClick()
@@ -52,12 +56,12 @@ class ReaderAccentDeviceTest {
     fun readingSettingsSheet_selectedMarkAccent_followsReadingTheme() {
         openFixture("sample_toc.md")
         // ⋮ 菜单 → 阅读设置（等下拉/面板滑入动画结束再点，防点击落空）
-        composeTestRule.onNodeWithContentDescription("菜单").performClick()
-        waitTextDisplayed("阅读设置")
-        composeTestRule.onNodeWithText("阅读设置").performClick()
-        waitTextDisplayed("排版")
+        composeTestRule.onNodeWithContentDescription(uiContext.getString(R.string.reader_menu_cd)).performClick()
+        waitTextDisplayed(uiContext.getString(R.string.reader_menu_settings))
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.reader_menu_settings)).performClick()
+        waitTextDisplayed(uiContext.getString(R.string.reader_layout))
         // 切到柔光米黄（面板配色与强调色应即时跟随）
-        composeTestRule.onNodeWithText("柔光米黄").performScrollTo().performClick()
+        composeTestRule.onNodeWithText(uiContext.getString(R.string.reader_theme_soft)).performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
         val theme = ReadingTheme.SOFT_LIGHT

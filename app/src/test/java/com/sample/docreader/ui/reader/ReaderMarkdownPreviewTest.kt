@@ -18,11 +18,13 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /** md 源码/预览切换（TC-F2-19、TC-F2-20）：菜单入口、渲染内容、序号与进度上报隔离 */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = "zh")
 class ReaderMarkdownPreviewTest {
 
     @get:Rule

@@ -162,7 +162,7 @@ class HomeViewModelTest {
         vm.createNew(Uri.parse("content://$AUTH/docs/bad"), DocFormat.MD)
         awaitUntil { vm.uiState.value.message != null }
 
-        assertTrue(vm.uiState.value.message!!.contains("新建文件失败"))
+        assertEquals(HomeMessage.CreateFailed, vm.uiState.value.message)
         assertNull(vm.uiState.value.editTarget)
         assertTrue(repo.recent.first().isEmpty())
     }
