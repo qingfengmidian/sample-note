@@ -66,3 +66,13 @@ F4.6/M14 落地后系统语言自动切换已可用，但用户无法在应用�
 ## 完成报告要求
 
 回复中列出：改动文件清单（按 T1~T3 分组）、红 → 绿实测计数、`./gradlew testDebugUnitTest` 完整结果、与本文档冲突或拿不准的点。
+
+## 实现回写（2026-09-18，审查后）
+
+审查记录见 `docs/collab/reviews/m16-review.md`，逐条处置见 `docs/collab/reviews/m16-review-response.md`；设计同步 REV16。
+
+- **契约调整**：`applyToFramework` 由返回 `Unit` 改为返回 `Boolean`（是否已交由框架处理），`needsManualRecreate` 删除；UI 以 `if (!LocaleSwitcher.applyToFramework(context, next)) recreate()` 决定是否自行重建。原因：原设计在 33+ 框架调用失败时既不重建也不换语言，与 F4.9「即时生效」有落差（审查建议 2）。
+- **启动期兜底**：`wrapBaseContext` 增 `runCatching`——DataStore 损坏（`CorruptionException`）时回退「跟随系统」，避免 `attachBaseContext` 抛异常导致应用启动即崩（审查建议 3）。
+- **注释修正**：`internal wrap` 改由 TC-UI-17 真正直驱，原注释「供测试直驱」当时不实（审查建议 4）；非局部 `return` 改 `return@runCatching`（审查建议 5）。
+- **测试返工（审查必修 1）**：TC-UI-17 ⑤ 框架态改**无条件断言**——原守卫式断言（`if (locales != null && !locales.isEmpty)`）的条件正是被测对象，红态必然跳过 = 假绿；新增 ⑥ `@Config(sdk=[32])` 低版本自重建路径（`buildActivity` + `recreate`）。红态反证：以空壳实现临时覆盖 `LocaleSwitcher` 后 `LocaleSwitchTest` **6/6 全红**。
+- **不修项**：建议 6（档位陈旧捕获，与既有 `theme`/`font`/行距行同款模式）与建议 8（`HomeScreen` 最近文件时间戳用 `Locale.getDefault()`，格式 `MM-dd HH:mm` 中英无差异）本次不修，记入 M16 遗留清单。
