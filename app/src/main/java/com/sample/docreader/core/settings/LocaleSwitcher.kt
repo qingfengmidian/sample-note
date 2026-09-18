@@ -11,14 +11,14 @@ import kotlinx.coroutines.runBlocking
 import java.util.Locale
 
 /**
- * 应用内语言切换（F4.9/M16，设计 REV15 §3.7、决策 D-2026-09-18-01）：
+ * 应用内语言切换（F4.9/M16，设计 REV15/REV16 §3.7、决策 D-2026-09-18-01）：
  * 档位 ↔ BCP-47 标签映射、base context 包装（全 API 级）与 API 33+ 框架路径。
  *
  * 持久值为**单一真值源**（`SettingsRepository.appLanguage`，DataStore 键 `app_language`；缺失/未知 = 跟随系统）：
  * - 全 API 级：`wrapBaseContext` 在 `MainActivity.attachBaseContext` 按持久值包装 Configuration——
  *   「手动选择优先于系统语言」在此路径保证，不依赖框架行为；
- * - API 33+：`applyToFramework` 额外同步框架态（`LocaleManager`），并由系统完成 Activity 重建；
- * - API 26~32：由设置页在写入完成后自行 `Activity.recreate()`（见 `needsManualRecreate`）。
+ * - API 33+：`applyToFramework` 额外同步框架态（`LocaleManager`）并由系统完成 Activity 重建；
+ * - API 26~32 **或框架不可用**：`applyToFramework` 返回 false，由调用方 `Activity.recreate()` 使包装生效。
  */
 object LocaleSwitcher {
 
@@ -49,11 +49,17 @@ object LocaleSwitcher {
     /**
      * 按持久值包装 base context（跟随系统时原样返回）；仅由 `MainActivity.attachBaseContext` 调用。
      * 同步读一次 DataStore（Activity 构造期，量小）；不做进程内缓存，避免外部写入后脏读。
+     * 读失败（如 DataStore 文件损坏——`CorruptionException`）回退「跟随系统」：attachBaseContext 抛异常会导致
+     * 应用启动即崩，不能把持久文件损坏放大成启动期故障。
      */
-    fun wrapBaseContext(base: Context): Context =
-        wrap(base, tagOf(runBlocking { SettingsRepository(base).appLanguage.first() }))
+    fun wrapBaseContext(base: Context): Context {
+        val language = runCatching {
+            runBlocking { SettingsRepository(base).appLanguage.first() }
+        }.getOrDefault(AppLanguage.SYSTEM)
+        return wrap(base, tagOf(language))
+    }
 
-    /** 包装语义（纯函数，供测试直驱）：[tag] 为 null 时原样返回，否则按 locale 生成 Configuration 上下文 */
+    /** 包装语义（纯函数，随 TC-UI-17 直驱）：[tag] 为 null 时原样返回，否则按 locale 生成 Configuration 上下文 */
     internal fun wrap(base: Context, tag: String?): Context {
         if (tag == null) return base
         val configuration = Configuration(base.resources.configuration).apply {
@@ -63,20 +69,18 @@ object LocaleSwitcher {
     }
 
     /**
-     * API 33+ 同步框架态（跟随系统 = 空 LocaleList）；低版本为显式空操作。
-     * 框架服务缺失（含单测环境）或调用被拒时静默回退——可见行为已由 [wrapBaseContext] 独立保证。
+     * API 33+ 同步框架态（跟随系统 = 空 LocaleList），返回**是否已交由框架处理**（框架会自行重建 Activity）。
+     * API < 33 或框架不可用（服务缺失 / 调用被拒，含单测与部分 OEM）返回 false——调用方须自行
+     * `Activity.recreate()`，否则本次切换要等下次 Activity 创建才可见（不满足 F4.9「即时生效」）。
      */
-    fun applyToFramework(context: Context, language: AppLanguage) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        runCatching {
-            val manager = context.getSystemService(LocaleManager::class.java) ?: return
+    fun applyToFramework(context: Context, language: AppLanguage): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        return runCatching {
+            val manager = context.getSystemService(LocaleManager::class.java) ?: return@runCatching false
             manager.setApplicationLocales(
                 tagOf(language)?.let { LocaleList.forLanguageTags(it) } ?: LocaleList.getEmptyLocaleList()
             )
-        }
+            true
+        }.getOrDefault(false)
     }
-
-    /** 切换后是否需由 UI 自行 recreate（API < 33）；33+ 由框架完成重建，避免重复 */
-    val needsManualRecreate: Boolean
-        get() = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
 }

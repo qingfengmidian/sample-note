@@ -121,10 +121,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onClick = {
                     val next = LocaleSwitcher.next(language)
                     scope.launch {
-                        // 先落库再切换：重建时 attachBaseContext 必须读到新值
+                        // 先落库再切换：重建时 attachBaseContext 必须读到新值。
+                        // 33+ 交由框架重建；框架不可用（含 API<33）则自行重建，保证「即时生效」
                         repository.saveAppLanguage(next)
-                        LocaleSwitcher.applyToFramework(context, next)
-                        if (LocaleSwitcher.needsManualRecreate) (context as? android.app.Activity)?.recreate()
+                        if (!LocaleSwitcher.applyToFramework(context, next)) {
+                            (context as? android.app.Activity)?.recreate()
+                        }
                     }
                 }
             )
