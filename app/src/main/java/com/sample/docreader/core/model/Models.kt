@@ -82,6 +82,12 @@ enum class WrapMode { WRAP, NO_WRAP }
  */
 enum class ReaderFont { CODE, SERIF, SANS, CUSTOM }
 
+/**
+ * 应用内语言档位（F4.9/M16）：SYSTEM = 跟随系统（默认；DataStore 键缺失或值未知即此档）。
+ * 标签读写与生效机制见 LocaleSwitcher；UI 侧经 settings_language_* 资源映射，本枚举不引用资源。
+ */
+enum class AppLanguage { SYSTEM, ZH, EN }
+
 /** 阅读主题：前景/背景成对搭配；颜色使用 Compose Color */
 enum class ReadingTheme(val background: Color, val foreground: Color) {
     DEFAULT(Color(0xFFFAFAFA), Color(0xFF1B1B1F)),    // 默认白（微淡灰白，降低 OLED 亮度冲击）

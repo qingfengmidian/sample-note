@@ -87,6 +87,11 @@
 
     <!-- settings：设置页（字体方案/编辑器/阅读默认值） -->
     <string name="settings_title">设置</string>
+    <string name="settings_general_section">通用</string>
+    <string name="settings_language">语言</string>
+    <string name="settings_language_system">跟随系统</string>
+    <string name="settings_language_zh">中文</string>
+    <string name="settings_language_en">English</string>
     <string name="settings_font_scheme">字体方案</string>
     <string name="settings_current">当前：%1$s</string>
     <string name="settings_custom_font_enabled">已启用自定义字体</string>

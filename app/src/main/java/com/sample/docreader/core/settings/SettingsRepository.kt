@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.sample.docreader.core.model.AppLanguage
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
@@ -36,6 +37,8 @@ class SettingsRepository(
         val THEME = stringPreferencesKey("theme") // 缺省/空 = 跟随系统
         val AUTO_SAVE = booleanPreferencesKey("auto_save")
         val CUSTOM_FONT_PATH = stringPreferencesKey("custom_font_path")
+        // F4.9/M16：应用内语言覆盖（BCP-47 标签 zh/en）；键缺失或值未知 = 跟随系统
+        val APP_LANGUAGE = stringPreferencesKey("app_language")
     }
 
     val settings: Flow<ReadingSettings> = dataStore.data.map { p ->
@@ -52,6 +55,11 @@ class SettingsRepository(
         )
     }
 
+    /** 应用内语言覆盖（F4.9/M16，UI 真值源）：经 LocaleSwitcher 归一化，缺失/未知标签 = 跟随系统 */
+    val appLanguage: Flow<AppLanguage> = dataStore.data.map { p ->
+        LocaleSwitcher.languageOf(p[Keys.APP_LANGUAGE])
+    }
+
     suspend fun save(settings: ReadingSettings) {
         dataStore.edit { p ->
             p[Keys.FONT_SIZE_SP] = settings.fontSizeSp
@@ -63,6 +71,17 @@ class SettingsRepository(
             p[Keys.AUTO_SAVE] = settings.autoSave
             if (settings.customFontPath == null) p.remove(Keys.CUSTOM_FONT_PATH)
             else p[Keys.CUSTOM_FONT_PATH] = settings.customFontPath
+        }
+    }
+
+    /**
+     * 写入应用内语言覆盖（F4.9/M16）；SYSTEM 时移除键（回到跟随系统，不再被旧值覆盖）。
+     * 与 [save] 键级隔离：保存阅读设置不会动该键。
+     */
+    suspend fun saveAppLanguage(language: AppLanguage) {
+        dataStore.edit { p ->
+            val tag = LocaleSwitcher.tagOf(language)
+            if (tag == null) p.remove(Keys.APP_LANGUAGE) else p[Keys.APP_LANGUAGE] = tag
         }
     }
 }
