@@ -1,5 +1,6 @@
 package com.sample.docreader.ui
 
+import android.app.Activity
 import android.graphics.Typeface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -125,7 +126,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         // 33+ 交由框架重建；框架不可用（含 API<33）则自行重建，保证「即时生效」
                         repository.saveAppLanguage(next)
                         if (!LocaleSwitcher.applyToFramework(context, next)) {
-                            (context as? android.app.Activity)?.recreate()
+                            (context as? Activity)?.recreate()
                         }
                     }
                 }

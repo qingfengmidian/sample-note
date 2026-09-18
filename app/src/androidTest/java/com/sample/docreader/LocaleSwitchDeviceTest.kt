@@ -12,15 +12,18 @@ import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * TC-UI-18（M16，F4.9）应用内语言切换设备端回归（红测试先行，需 connectedDebugAndroidTest 执行）。
+ * TC-UI-18（M16，F4.9）应用内语言切换设备端回归（需 connectedDebugAndroidTest 执行）。
  *
- * ① 包装路径（全 API 级）：持久 en → 启动 MainActivity，活动资源取英文（对系统语言 = 中文的机器可判）；
+ * ① 包装路径（全 API 级）：持久覆盖 → 启动 MainActivity，活动资源取对应语言——
+ * **判别力与系统语言无关**（OpenCode 复核建议 4）：先测无覆盖时的基础 locale，再取「与之不同」的
+ * 语言作覆盖目标，避免英文系统/CI 模拟器下假绿；
  * ② 框架路径（API 33+）：`applyToFramework(EN)` 后系统按应用语言 = en。
- * 用例结束恢复「跟随系统」（仅清除本应用的覆盖，不改系统语言设置）。
+ * 每例前后均清理（@Before/@After 同构，OpenCode 复核建议 5），仅清除本应用覆盖、不改系统语言设置。
  */
 @RunWith(AndroidJUnit4::class)
 class LocaleSwitchDeviceTest {
@@ -28,6 +31,14 @@ class LocaleSwitchDeviceTest {
     private val appContext: Context get() = ApplicationProvider.getApplicationContext()
 
     private val repository: SettingsRepository get() = SettingsRepository(appContext)
+
+    @Before
+    fun clearBefore() {
+        runBlocking { repository.saveAppLanguage(AppLanguage.SYSTEM) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            LocaleSwitcher.applyToFramework(appContext, AppLanguage.SYSTEM)
+        }
+    }
 
     @After
     fun restoreFollowSystem() {
@@ -39,11 +50,19 @@ class LocaleSwitchDeviceTest {
 
     @Test
     fun tcUi18_launchActivity_appliesPersistedLanguage() {
-        runBlocking { repository.saveAppLanguage(AppLanguage.EN) }
+        // 与基础 locale 相反的语言作目标：英文系统断中文、中文系统断英文，任何环境下都有判别力
+        val baselineLanguage = launchAndReadBaselineLanguage()
+        val target = if (baselineLanguage == "zh") AppLanguage.EN else AppLanguage.ZH
+        val expectedName = if (target == AppLanguage.ZH) "简记" else "Sample Note"
+
+        runBlocking { repository.saveAppLanguage(target) }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                assertEquals("Sample Note", activity.getString(R.string.app_name))
-                assertEquals("en", activity.resources.configuration.locales[0].language)
+                assertEquals(expectedName, activity.getString(R.string.app_name))
+                assertEquals(
+                    LocaleSwitcher.tagOf(target),
+                    activity.resources.configuration.locales[0].language
+                )
             }
         }
     }
@@ -59,5 +78,15 @@ class LocaleSwitchDeviceTest {
                 assertEquals("en", locales?.get(0)?.language)
             }
         }
+    }
+
+    /** 无覆盖（跟随系统）启动一次，读出基础 locale 语言码（目标语言选择的依据） */
+    private fun launchAndReadBaselineLanguage(): String {
+        runBlocking { repository.saveAppLanguage(AppLanguage.SYSTEM) }
+        var language = ""
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { language = it.resources.configuration.locales[0].language }
+        }
+        return language
     }
 }

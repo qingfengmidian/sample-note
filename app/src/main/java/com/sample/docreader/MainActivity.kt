@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * F4.9/M16：按持久语言覆盖包装 base context（跟随系统时原样返回）——「手动选择优先于系统语言」
-     * 在此路径保证；API 33+ 的框架态同步与重建见 LocaleSwitcher.applyToFramework / needsManualRecreate。
+     * 在此路径保证；API 33+ 的框架态同步见 LocaleSwitcher.applyToFramework（返回 false 时由 UI 自行 recreate）。
      */
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(LocaleSwitcher.wrapBaseContext(newBase))

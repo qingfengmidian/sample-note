@@ -1,6 +1,7 @@
 package com.sample.docreader.core.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import com.sample.docreader.core.model.AppLanguage
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.model.ReadingTheme
@@ -82,5 +83,19 @@ class SettingsRepositoryTest {
         // 清除自定义字体路径（切回内置字体）后键应被移除
         repo.save(ReadingSettings(font = ReaderFont.CODE, customFontPath = null))
         assertNull(repo.settings.first().customFontPath)
+    }
+
+    /** 键级隔离（F4.9/M16，OpenCode 复核建议 6）：save(ReadingSettings) 不触碰 app_language，反之亦然 */
+    @Test
+    fun appLanguage_isolatedFromReadingSettings() = runTest {
+        val repo = newRepository(this)
+        repo.saveAppLanguage(AppLanguage.ZH)
+        repo.save(ReadingSettings(fontSizeSp = 20, theme = ReadingTheme.NIGHT))
+        assertEquals(AppLanguage.ZH, repo.appLanguage.first())
+        assertEquals(20, repo.settings.first().fontSizeSp)
+
+        repo.saveAppLanguage(AppLanguage.SYSTEM)
+        assertEquals(ReadingTheme.NIGHT, repo.settings.first().theme)
+        assertEquals(AppLanguage.SYSTEM, repo.appLanguage.first())
     }
 }
