@@ -6,8 +6,9 @@
 
 1. **只读复核**：不得修改任何 `app/src/`、`docs/`（除下述审查报告）、`buildSrc/`、`AGENTS.md` 等仓库文件；不得 `git add/commit/push`（你的 git 写权限已被 opencode.json 禁用）。
 2. 唯一允许的写入：`docs/collab/reviews/m16-opencode-review.md`（新建）。
-3. 只运行已预批命令：`git status/log/diff/show`、文件读取、`./gradlew testDebugUnitTest`；其余命令一律不执行，需要时记入报告「未验证项」。
+3. 只运行已预批命令：`git status` / `git log` / `git diff` / `git show`、文件读取、`./gradlew testDebugUnitTest`；其余命令一律不执行，需要时记入报告「未验证项」。
 4. 发现必修问题**不要动手修**，写入报告等待处置。
+5. **执行方式约束（重要）**：每条 shell 命令**单独执行**，不要用 `&&`、`;`、`||` 或换行拼接多条命令，也不要用 `echo` 做分隔——opencode.json 的权限按**单条命令前缀**匹配，复合命令会被自动拒绝并中止任务。例如依次单独执行 `git status`、再 `git log --oneline -15`、再 `git show 39856fd`。
 
 ## 必读材料（按序）
 
