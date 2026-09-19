@@ -39,13 +39,6 @@ object LocaleSwitcher {
         else -> AppLanguage.SYSTEM
     }
 
-    /** 设置页循环档位：跟随系统 → 中文 → English → 跟随系统 */
-    fun next(current: AppLanguage): AppLanguage = when (current) {
-        AppLanguage.SYSTEM -> AppLanguage.ZH
-        AppLanguage.ZH -> AppLanguage.EN
-        AppLanguage.EN -> AppLanguage.SYSTEM
-    }
-
     /**
      * 按持久值包装 base context（跟随系统时原样返回）；仅由 `MainActivity.attachBaseContext` 调用。
      * 同步读一次 DataStore（Activity 构造期，量小）；不做进程内缓存，避免外部写入后脏读。

@@ -1,7 +1,8 @@
 package com.sample.docreader.ui
 
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -50,7 +51,10 @@ class SettingsLineHeightPickerTest {
         listOf("120%", "150%", "180%", "200%").forEach { option ->
             composeRule.onNodeWithText(option).assertExists()
         }
-        composeRule.onNodeWithText("150%").assertIsSelected()
+        // 当前值 150% 选中（与选中语义联合断言：背景行值同字面，单匹配断言会被双节点卡死）
+        composeRule.onNode(
+            hasText("150%") and SemanticsMatcher.expectValue(SemanticsProperties.Selected, true)
+        ).assertExists()
     }
 
     /** ② 点选 180% → 即时持久化且对话框关闭 */

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.graphics.Typeface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,10 +13,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -31,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -53,9 +58,10 @@ import java.util.UUID
 /**
  * 设置页（M4）：自定义字体导入（SAF 选 ttf/otf → 复制到 files/fonts/ → Typeface 预验证 → 存路径）。
  * 全局阅读默认项（M8a，F4.3/TC-F4-03）：默认字号/行距/换行/字体/主题，修改即时经 SettingsRepository
- * 持久化；档位序列与阅读页 ReaderViewModel（stepFontSize/cycleLineHeight/cycleFont/cycleTheme）完全一致，
+ * 持久化；M17 起行距/换行/字体/主题改为选项列表交互（点击行唤单选对话框，点选即生效，TC-UI-19），
  * 阅读页订阅同一份 settings flow，新打开的文件自然应用新默认值。
- * M16（F4.9）：顶部「通用」小节的语言行（跟随系统/中文/英文）写独立 DataStore 键并即时重建生效。
+ * M16（F4.9）：顶部「通用」小节的语言行（跟随系统/中文/英文）写独立 DataStore 键；
+ * M17 起改为选项对话框 + 确认重启（决策 D-2026-09-19-02）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,6 +73,11 @@ fun SettingsScreen(onBack: () -> Unit) {
     val language by repository.appLanguage.collectAsStateWithLifecycle(initialValue = AppLanguage.SYSTEM)
     val scope = rememberCoroutineScope()
     var message by remember { mutableStateOf<String?>(null) }
+    // M17（F4.9/决策 D-2026-09-19-02）：语言选项选定但尚未确认的档位；非空即弹确认重启框
+    var pendingLanguage by remember { mutableStateOf<AppLanguage?>(null) }
+    // M17：当前打开的选项对话框（单一状态源）；对话框打开期间背景行值不进入语义树（模态隔离，见 OptionPickerRow）
+    var openPicker by remember { mutableStateOf<SettingsPicker?>(null) }
+    val showRowValues = openPicker == null
 
     fun importFont(uri: android.net.Uri) {
         scope.launch {
@@ -110,26 +121,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // F4.9/M16：应用内语言（跟随系统/中文/English），选中即时持久化；<33 自行重建，33+ 由框架重建
+            // F4.9/M17：应用内语言（跟随系统/中文/English）选项对话框；选定不同档 → 确认重启框，确认后先落库再重建
             Text(stringResource(R.string.settings_general_section), style = MaterialTheme.typography.titleSmall)
-            CycleSettingRow(
+            OptionPickerRow(
                 title = stringResource(R.string.settings_language),
-                value = when (language) {
-                    AppLanguage.SYSTEM -> stringResource(R.string.settings_language_system)
-                    AppLanguage.ZH -> stringResource(R.string.settings_language_zh)
-                    AppLanguage.EN -> stringResource(R.string.settings_language_en)
-                },
-                onClick = {
-                    val next = LocaleSwitcher.next(language)
-                    scope.launch {
-                        // 先落库再切换：重建时 attachBaseContext 必须读到新值。
-                        // 33+ 交由框架重建；框架不可用（含 API<33）则自行重建，保证「即时生效」
-                        repository.saveAppLanguage(next)
-                        if (!LocaleSwitcher.applyToFramework(context, next)) {
-                            (context as? Activity)?.recreate()
-                        }
-                    }
-                }
+                value = languageLabel(language),
+                options = AppLanguage.entries,
+                optionLabel = { languageLabel(it) },
+                isSelected = { it == language },
+                onSelect = { selected -> if (selected != language) pendingLanguage = selected },
+                expanded = openPicker == SettingsPicker.LANGUAGE,
+                onExpandedChange = { open -> openPicker = if (open) SettingsPicker.LANGUAGE else null },
+                showValue = showRowValues
             )
             Text(stringResource(R.string.settings_font_scheme), style = MaterialTheme.typography.titleSmall)
             Text(
@@ -174,7 +177,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     scope.launch { repository.save(settings.copy(autoSave = enabled)) }
                 }
             )
-            // 全局阅读默认项（F4.3/TC-F4-03，M8a）：档位逻辑与 ReaderViewModel 完全一致，即时持久化
+            // 全局阅读默认项（F4.3/TC-F4-03，M8a）：选项列表交互（M17/TC-UI-19），点选即持久化
             Text(stringResource(R.string.settings_reading_defaults), style = MaterialTheme.typography.titleSmall)
             FontSizeSettingRow(
                 fontSizeSp = settings.fontSizeSp,
@@ -182,42 +185,89 @@ fun SettingsScreen(onBack: () -> Unit) {
                     scope.launch { repository.save(settings.copy(fontSizeSp = stepFontSize(settings.fontSizeSp, delta))) }
                 }
             )
-            CycleSettingRow(
+            OptionPickerRow(
                 title = stringResource(R.string.settings_default_line_spacing),
                 value = "${settings.lineHeightPercent}%",
-                onClick = {
-                    scope.launch {
-                        repository.save(settings.copy(lineHeightPercent = nextLineHeight(settings.lineHeightPercent)))
-                    }
-                }
+                options = ReaderViewModel.LINE_HEIGHT_STEPS,
+                optionLabel = { "$it%" },
+                isSelected = { it == settings.lineHeightPercent },
+                onSelect = { percent -> scope.launch { repository.save(settings.copy(lineHeightPercent = percent)) } },
+                expanded = openPicker == SettingsPicker.LINE_HEIGHT,
+                onExpandedChange = { open -> openPicker = if (open) SettingsPicker.LINE_HEIGHT else null },
+                showValue = showRowValues
             )
-            CycleSettingRow(
+            OptionPickerRow(
                 title = stringResource(R.string.settings_default_wrap_mode),
                 value = if (settings.wrapMode == WrapMode.WRAP) stringResource(R.string.reader_auto_wrap)
                 else stringResource(R.string.reader_no_wrap),
-                onClick = {
-                    scope.launch {
-                        repository.save(
-                            settings.copy(
-                                wrapMode = if (settings.wrapMode == WrapMode.WRAP) WrapMode.NO_WRAP else WrapMode.WRAP
-                            )
-                        )
-                    }
-                }
+                options = listOf(WrapMode.WRAP, WrapMode.NO_WRAP),
+                optionLabel = {
+                    if (it == WrapMode.WRAP) stringResource(R.string.reader_auto_wrap)
+                    else stringResource(R.string.reader_no_wrap)
+                },
+                isSelected = { it == settings.wrapMode },
+                onSelect = { mode -> scope.launch { repository.save(settings.copy(wrapMode = mode)) } },
+                expanded = openPicker == SettingsPicker.WRAP,
+                onExpandedChange = { open -> openPicker = if (open) SettingsPicker.WRAP else null },
+                showValue = showRowValues
             )
-            CycleSettingRow(
+            OptionPickerRow(
                 title = stringResource(R.string.settings_default_font),
                 value = fontLabel(settings.font),
-                onClick = {
-                    // G2（M10）：customFontPath 非空时循环序列纳入 CUSTOM（与 ReaderViewModel.cycleFont 一致）
-                    scope.launch { repository.save(settings.copy(font = nextFont(settings.font, settings.customFontPath))) }
-                }
+                // G2（M10）：customFontPath 非空时选项序列追加 CUSTOM（切离 CUSTOM 不删文件，允许切回）
+                options = if (settings.customFontPath != null) {
+                    listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS, ReaderFont.CUSTOM)
+                } else {
+                    listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
+                },
+                optionLabel = { fontLabel(it) },
+                isSelected = { it == settings.font },
+                onSelect = { font -> scope.launch { repository.save(settings.copy(font = font)) } },
+                expanded = openPicker == SettingsPicker.FONT,
+                onExpandedChange = { open -> openPicker = if (open) SettingsPicker.FONT else null },
+                showValue = showRowValues
             )
-            CycleSettingRow(
+            OptionPickerRow(
                 title = stringResource(R.string.settings_default_theme),
                 value = themeLabel(settings.theme),
-                onClick = { scope.launch { repository.save(settings.copy(theme = nextTheme(settings.theme))) } }
+                options = listOf(null, ReadingTheme.DEFAULT, ReadingTheme.EYE_CARE,
+                    ReadingTheme.SOFT_LIGHT, ReadingTheme.NIGHT),
+                optionLabel = { themeLabel(it) },
+                isSelected = { it == settings.theme },
+                onSelect = { theme -> scope.launch { repository.save(settings.copy(theme = theme)) } },
+                expanded = openPicker == SettingsPicker.THEME,
+                onExpandedChange = { open -> openPicker = if (open) SettingsPicker.THEME else null },
+                showValue = showRowValues
             )
+
+            // M17（F4.9/决策 D-2026-09-19-02）：语言确认重启框；「取消」不落库，「立即重启」先落库再重建
+            pendingLanguage?.let { target ->
+                AlertDialog(
+                    onDismissRequest = { pendingLanguage = null },
+                    title = { Text(stringResource(R.string.settings_language_restart_title)) },
+                    text = { Text(stringResource(R.string.settings_language_restart_message)) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                pendingLanguage = null
+                                scope.launch {
+                                    // 先落库再切换：重建时 attachBaseContext 必须读到新值。
+                                    // 33+ 交由框架重建；框架不可用（含 API<33）则自行重建，保证「即时生效」
+                                    repository.saveAppLanguage(target)
+                                    if (!LocaleSwitcher.applyToFramework(context, target)) {
+                                        (context as? Activity)?.recreate()
+                                    }
+                                }
+                            }
+                        ) { Text(stringResource(R.string.common_restart_now)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingLanguage = null }) {
+                            Text(stringResource(R.string.common_cancel))
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -318,26 +368,85 @@ private fun FontSizeSettingRow(fontSizeSp: Int, onStep: (Int) -> Unit) {
 }
 
 /**
- * 循环切换设置行（F4.3/TC-F4-03）：行距/换行模式/字体/主题通用。
- * 切换按钮 contentDescription 与行文本同名（约定见 SettingsGlobalTest），可点击目标 ≥ 48dp。
+ * 设置页五个选项列表行（M17，单一对话框状态源；任一对话框打开时隐藏全部背景行值语义，
+ * 避免与对话框选项文本在语义树重复——如语言行值「跟随系统」与主题对话框选项同字面）。
+ */
+private enum class SettingsPicker { LANGUAGE, LINE_HEIGHT, WRAP, FONT, THEME }
+
+/**
+ * 选项列表设置行（M17，F4.3/TC-UI-19，决策 D-2026-09-19-01）：整行可点（≥48dp），行尾显示当前值；
+ * 点击唤出单选对话框（标题 = 行标题），列出全部可选值并标记当前值，点选即回调并关闭。
+ * [expanded]/[onExpandedChange] 由调用方统一持有：任一选项对话框打开时全部背景行值不进入语义树
+ * （[showValue] = false，视觉保留）——模态弹层打开时背景不进入无障碍树，同时避免背景行值与对话框选项
+ * 文本在语义树重名（如「150%」「跟随系统」）。红测试据此以单匹配断言直达对话框选项（见 SettingsOptionPickerTest）。
  */
 @Composable
-private fun CycleSettingRow(title: String, value: String, onClick: () -> Unit) {
+private fun <T> OptionPickerRow(
+    title: String,
+    value: String,
+    options: List<T>,
+    optionLabel: @Composable (T) -> String,
+    isSelected: (T) -> Boolean,
+    onSelect: (T) -> Unit,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    showValue: Boolean,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 48.dp),
+            .defaultMinSize(minHeight = 48.dp)
+            .clickable { onExpandedChange(true) },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodyMedium)
-        TextButton(
-            onClick = onClick,
-            modifier = Modifier
-                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                .semantics { contentDescription = title }
-        ) { Text(stringResource(R.string.common_switch)) }
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            // 对话框打开期间保留行值视觉、仅退出语义树（模态隔离，见 kdoc）
+            modifier = if (showValue) Modifier else Modifier.clearAndSetSemantics {}
+        )
     }
+    if (expanded) {
+        AlertDialog(
+            onDismissRequest = { onExpandedChange(false) },
+            title = { Text(title) },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    options.forEach { option ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
+                                .selectable(
+                                    selected = isSelected(option),
+                                    onClick = {
+                                        onSelect(option)
+                                        onExpandedChange(false)
+                                    }
+                                ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = isSelected(option), onClick = null)
+                            Text(optionLabel(option), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { onExpandedChange(false) }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
+    }
+}
+
+/** 语言档位标签（跟随系统/中文/English）；语言行值与选项共用 */
+@Composable
+private fun languageLabel(language: AppLanguage): String = when (language) {
+    AppLanguage.SYSTEM -> stringResource(R.string.settings_language_system)
+    AppLanguage.ZH -> stringResource(R.string.settings_language_zh)
+    AppLanguage.EN -> stringResource(R.string.settings_language_en)
 }
 
 /** 字号档位步进（12/14/16/18/20/22/24），到端点 clamp；与 ReaderViewModel.stepFontSize 同一套档位常量 */
@@ -345,33 +454,6 @@ private fun stepFontSize(current: Int, delta: Int): Int {
     val steps = ReaderViewModel.FONT_SIZE_STEPS
     val index = steps.indexOf(current).coerceAtLeast(0)
     return steps[(index + delta).coerceIn(0, steps.lastIndex)]
-}
-
-/** 行距档位循环：120→150→180→200（与 ReaderViewModel.cycleLineHeight 一致） */
-private fun nextLineHeight(current: Int): Int {
-    val steps = ReaderViewModel.LINE_HEIGHT_STEPS
-    val index = steps.indexOf(current)
-    return steps[(index + 1).mod(steps.size)]
-}
-
-/**
- * 字体循环：代码→衬线→无衬线；G2（M10）：customFontPath 非空时序列追加 CUSTOM。
- * 与 ReaderViewModel.cycleFont 一致。
- */
-private fun nextFont(current: ReaderFont, customFontPath: String? = null): ReaderFont {
-    val order = if (customFontPath != null) {
-        listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS, ReaderFont.CUSTOM)
-    } else {
-        listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
-    }
-    return order[(order.indexOf(current) + 1).mod(order.size)]
-}
-
-/** 主题循环：跟随系统→默认白→护眼绿→柔光米黄→夜间黑（与 ReaderViewModel.cycleTheme 一致） */
-private fun nextTheme(current: ReadingTheme?): ReadingTheme? {
-    val order = listOf(null, ReadingTheme.DEFAULT, ReadingTheme.EYE_CARE,
-        ReadingTheme.SOFT_LIGHT, ReadingTheme.NIGHT)
-    return order[(order.indexOf(current) + 1).mod(order.size)]
 }
 
 @Composable

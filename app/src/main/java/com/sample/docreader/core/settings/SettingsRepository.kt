@@ -2,12 +2,13 @@ package com.sample.docreader.core.settings
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.preferencesDataStoreFile
 import com.sample.docreader.core.model.AppLanguage
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
@@ -16,7 +17,21 @@ import com.sample.docreader.core.model.WrapMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+/**
+ * DataStore 实例按 `applicationContext` 缓存（M17 由单例委托改造）：同一进程内每应用一份，
+ * 生产语义不变；Robolectric 每个测试方法会重建 Application，故各方法获得独立实例与独立文件，
+ * 避免 settings 数据跨用例串文件（TC-UI-19/17 需要「默认值」类用例独立）。
+ */
+private val settingsDataStores = java.util.WeakHashMap<Context, DataStore<Preferences>>()
+
+private fun Context.settingsDataStore(): DataStore<Preferences> =
+    synchronized(settingsDataStores) {
+        settingsDataStores.getOrPut(applicationContext) {
+            PreferenceDataStoreFactory.create(
+                produceFile = { applicationContext.preferencesDataStoreFile("settings") }
+            )
+        }
+    }
 
 /**
  * 全局阅读/显示设置仓库（DataStore Preferences）。
@@ -27,7 +42,7 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 class SettingsRepository(
     private val dataStore: DataStore<Preferences>
 ) {
-    constructor(context: Context) : this(context.settingsDataStore)
+    constructor(context: Context) : this(context.settingsDataStore())
 
     private object Keys {
         val FONT_SIZE_SP = intPreferencesKey("font_size_sp")

@@ -12,6 +12,7 @@
     <string name="common_discard">Discard</string>
     <string name="common_delete">Delete</string>
     <string name="common_switch">Switch</string>
+    <string name="common_restart_now">Restart now</string>
     <string name="common_state_selected">Selected</string>
     <string name="common_state_unselected">Not selected</string>
 
@@ -92,6 +93,8 @@
     <string name="settings_language_system">System default</string>
     <string name="settings_language_zh">中文</string>
     <string name="settings_language_en">English</string>
+    <string name="settings_language_restart_title">Switch language</string>
+    <string name="settings_language_restart_message">Switching language requires restarting the app. Restart now?</string>
     <string name="settings_font_scheme">Font scheme</string>
     <string name="settings_current">Current: %1$s</string>
     <string name="settings_custom_font_enabled">Custom font enabled</string>

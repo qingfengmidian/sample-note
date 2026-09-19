@@ -93,12 +93,8 @@ class SettingsLanguageUiTest {
         composeRule.onNodeWithText("切换语言需要重启应用，是否立即重启？").assertExists()
         composeRule.onNodeWithText("立即重启").assertExists()
         composeRule.onNodeWithText("取消").assertExists()
-        // 选项对话框已关闭：「跟随系统」仅剩主界面行值一处
-        assertEquals(
-            "语言选项对话框应已关闭",
-            1,
-            composeRule.onAllNodesWithText("跟随系统").fetchSemanticsNodes().size
-        )
+        // 语言选项对话框已关闭：「中文」仅存在于语言选项对话框中，确认框阶段不应再出现
+        composeRule.onNodeWithText("中文").assertDoesNotExist()
     }
 
     /** ④ 确认框「取消」→ 持久值保持「跟随系统」不落库 */

@@ -12,6 +12,7 @@
     <string name="common_discard">放弃</string>
     <string name="common_delete">删除</string>
     <string name="common_switch">切换</string>
+    <string name="common_restart_now">立即重启</string>
     <string name="common_state_selected">已选中</string>
     <string name="common_state_unselected">未选中</string>
 
@@ -92,6 +93,8 @@
     <string name="settings_language_system">跟随系统</string>
     <string name="settings_language_zh">中文</string>
     <string name="settings_language_en">English</string>
+    <string name="settings_language_restart_title">切换语言</string>
+    <string name="settings_language_restart_message">切换语言需要重启应用，是否立即重启？</string>
     <string name="settings_font_scheme">字体方案</string>
     <string name="settings_current">当前：%1$s</string>
     <string name="settings_custom_font_enabled">已启用自定义字体</string>
