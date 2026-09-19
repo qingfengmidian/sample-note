@@ -5,18 +5,31 @@
 | 日期 | 2026-09-19 |
 | 审查对象 | OpenCode 实现（工作区改动，基线 `31efb2b` 红测试），依据需求 REV14 / 设计 REV18 §3.10 / 测试用例 REV13 / 决策 D-2026-09-19-03 / 简报 `m18-ask-ai.md` |
 | 实现者 | OpenCode（实施报告 `docs/collab/reviews/m18-opencode-report.md`） |
-| 结论 | ✅ **审查通过（返工后）**：必修 1（⋮ 菜单入口未受总开关约束）已由 OpenCode 返工修复并通过复审；建议 3 项已处置/记录 |
+| 结论 | ✅ **审查通过（两轮返工后）**：必修 1（菜单未受总开关约束）、必修 2（缺 `<queries>` 致真机枚举失效）、必修 3（未实现内置预设）均已由 OpenCode 返工修复并通过复审；建议 3 项已处置/记录 |
 
 ## 1. 必修项
 
 **必修 1：⋮ 菜单「问 AI」入口未检查总开关 `ask_ai_enabled`**
-
 - 事实：`MainActivity.kt:151-163` 的 `onAskAi` 只做「剪贴板空 → 提示」，否则直接 `sendAskAi(text)`；`sendAskAi` 只校验目标应用（`askAiTarget`），**未校验 `askAiEnabled`**。故「设置里关闭问 AI」后，从阅读器 ⋮ 菜单点「问 AI」仍会把内容发给目标应用。
 - 违反：设计 REV18 §3.10-1「关闭时既不监听剪贴板**也不提供菜单发送**」；测试用例 TC-F4-11 ③「设置关闭后无提示、菜单项亦不发送（提示未启用）」。
 - 红测试未能捕获的原因：该路径属手工用例（TC-F4-11），自动化红测试覆盖的是 `AskAi.shouldOffer` 的 `enabled` 门控（剪贴板路径），二者不是同一入口——属**测试覆盖边界**而非实现者疏忽，但终态必须补齐。
 - 处置：返工（交 OpenCode，保持「实现由 OpenCode 完成」的固定顺序）。要求：菜单路径在 `enabled == false` 时给出「未启用」提示且不发送；新增字符串键 `ask_ai_disabled`（中英同键）；不改测试。
 - **返工结果（2026-09-19，OpenCode）**：`MainActivity.kt` 的 `onAskAi` 改为优先判断 `askAiEnabled`——关闭时 Snackbar 提示「已关闭，可在设置中开启」且**不读剪贴板、不发送**；新增 `ask_ai_disabled` 键（values/values-zh 各 128 键，键集对等）；测试零改动；报告追加「6. 审查返工记录」。
 - **复审（Kimi）**：查看返工 diff 确认门控位于剪贴板读取之前（无「关闭态仍读剪贴板」副作用）；键计数 128=128；返工后 `testDebugUnitTest --rerun-tasks` 独立复跑 **290/0/1skip**、`assembleDebug` 与 `compileDebugAndroidTestKotlin` 通过。**必修 1 关闭。**
+
+**必修 2：`AndroidManifest.xml` 缺 `<queries>` 声明 → 真机候选枚举近乎失效（D16 走查发现）**
+
+- 事实：真机（PHM110 / Android 13）设置页「目标应用」对话框只列出「朗读」「蓝牙」，**已安装的 DeepSeek 不在其中**；`adb shell cmd package query-activities -a android.intent.action.SEND -t text/plain` 显示系统侧存在 5+ 个接收方（浏览器/彩信/云盘等），而应用内 `queryIntentActivities` 仅返回 2 个。
+- 根因：Android 11+ 包可见性过滤——未在 `<queries>` 声明目标 intent 的应用，`queryIntentActivities`/`getApplicationInfo` 只能看到系统预置的一部分；此前本应用从未声明 `<queries>`。
+- 违反：需求 F4.10「目标应用由**动态枚举**（可接收 text/plain 的已安装应用）中选择」；设计 §3.10-2。属**功能不可用**级缺陷。
+- 处置：返工——`AndroidManifest.xml` 增 `<queries>`（SEND/text-plain intent + 预设包名 `<package>` 两项）。**不是权限**：不申请运行时权限、不影响「不联网/不采集」红线（已在设计 §3.10-2 注明）。
+
+**必修 3：未实现「内置预设」（需求与决策明确要求）**
+
+- 事实：实现只有动态枚举，无预设候选；决策 D-2026-09-19-03 与需求 F4.10 均为「动态枚举 **+ 内置 DeepSeek/豆包预设**」。框定侧亦有缺口（原设计 §3.10-2 未写预设语义，已在返工前补写）。
+- 处置：返工——`AskAi.PRESET_TARGETS`（DeepSeek `com.deepseek.chat`、豆包 `com.larus.nova`）+ `candidates` = 预设中已安装者 ∪ 枚举结果 → 按包名去重（label 优先 `loadLabel`、回落预设展示名）→ 排序 → 排除自身；补红测试 `tcUt19_candidates_includesInstalledPresets`（返工前已确认为红）。
+- **返工结果（2026-09-19，OpenCode，第二轮）**：manifest `<queries>` 落地；`AskAi` 预设合并实现；测试零改动；报告追加「7. 审查返工记录（第二轮）」；`testDebugUnitTest` **291/0/1skip**（+1 为新增预设用例转绿）、`assembleDebug` 与 `compileDebugAndroidTestKotlin` 通过。
+- **复审（Kimi）**：核对 manifest 无新增权限项、`<queries>` 仅声明可见范围；核对合并逻辑去重/标签回落/排除自身与预设语义一致；独立复跑 291/0/1skip；**重做 D16 走查确认真机候选出现 DeepSeek**（见 `m18-acceptance.md`）。
 
 ## 2. 建议与处置
 

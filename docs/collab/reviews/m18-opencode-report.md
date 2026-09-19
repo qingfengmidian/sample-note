@@ -145,3 +145,33 @@ BUILD SUCCESSFUL in 443ms
 - 无测试失败，无新增告警（仅既有 `ReaderScreen.kt` 系统栏 API deprecation 警告）。
 
 **状态**：必修项已返工，等待 Kimi 复审。
+
+## 7. 审查返工记录（第二轮：包可见性与内置预设）
+
+**背景**：Kimi 在 M18 真机走查中发现 2 项必修——「目标应用」候选只出现「朗读」「蓝牙」，已安装的 DeepSeek（`com.deepseek.chat`）不在其中，功能实际不可用：
+
+1. **必修 2（包可见性）**：Android 11+ 包可见性过滤使 `queryIntentActivities` / `getApplicationInfo` 只返回少量结果。
+2. **必修 3（内置预设）**：仅靠动态枚举无法覆盖未注册 `ACTION_SEND` 的应用，需以内置预设补齐。
+
+**改动**：
+
+1. `app/src/main/AndroidManifest.xml`：新增 `<queries>`（非权限、不申请运行时权限、不改变「不联网不采集」红线）——
+   - `<intent>`：`android.intent.action.SEND` + `<data android:mimeType="text/plain"/>`，使动态枚举可见全部文本接收方；
+   - `<package android:name="com.deepseek.chat"/>` 与 `<package android:name="com.larus.nova"/>`，使预设包可被 `getApplicationInfo` 感知。
+2. `app/src/main/java/com/sample/docreader/core/askai/AskAi.kt`：
+   - 新增 `PRESET_TARGETS`：DeepSeek（`com.deepseek.chat`，label `DeepSeek`）、豆包（`com.larus.nova`，label `豆包`）。
+   - `candidates` 改为「预设中已安装者 ∪ 动态枚举结果」：
+     - 预设先入候选，仅当 `packageManager.getApplicationInfo(pkg, 0)`（包 `runCatching` try/catch）成功即视为已安装（**不要求注册 `ACTION_SEND`**）；
+     - 与动态枚举结果按包名去重（`LinkedHashSet`，同包保留一条）；
+     - label 优先取 `loadLabel`（预设取 `ApplicationInfo.loadLabel`），失败/空白回落预设展示名（动态枚举仍回落包名）；
+     - 统一排除本应用自身、按 label 排序。
+3. 未改动任何测试代码（红测试 `tcUt19_candidates_includesInstalledPresets` 保持原样）。
+
+**验证结果**（均为本会话实际执行）：
+
+- `./gradlew testDebugUnitTest --rerun-tasks`：**BUILD SUCCESSFUL**；汇总 `TEST-*.xml`：`tests=291 failures=0 errors=0 skipped=1`（较返工前 290 例 +1，即新增红测试转绿；唯一 skip 为既有 `@Ignore`，非本批次引入）。
+- `./gradlew assembleDebug`：**BUILD SUCCESSFUL**。
+- `./gradlew compileDebugAndroidTestKotlin`：**BUILD SUCCESSFUL**。
+- 无测试失败，无新增告警（仅既有 `ReaderScreen.kt` 系统栏 API deprecation 与 `AskAiTest.kt` Shadow API deprecation 警告）。
+
+**状态**：必修 2 / 必修 3 已返工，等待 Kimi 复审。

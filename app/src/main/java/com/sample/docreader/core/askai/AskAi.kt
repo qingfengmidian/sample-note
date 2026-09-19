@@ -18,13 +18,43 @@ data class AskAiTarget(val packageName: String, val label: String)
  */
 object AskAi {
 
-    /** 动态枚举可接收 text/plain 的已安装应用：按包名去重、按 label 排序、排除本应用自身 */
+    /**
+     * 内置预设目标（设计 REV18 §3.10）：`<queries>` 声明后即使应用未注册 `ACTION_SEND`
+     * 也能被 `getApplicationInfo` 感知。真机走查发现 DeepSeek 等应用未出现在动态枚举中，
+     * 故以「预设中已安装者 ∪ 动态枚举结果」补齐。
+     */
+    val PRESET_TARGETS: List<AskAiTarget> = listOf(
+        AskAiTarget("com.deepseek.chat", "DeepSeek"),
+        AskAiTarget("com.larus.nova", "豆包"),
+    )
+
+    /**
+     * 可接收 text/plain 的候选应用：预设中已安装者（不要求注册 `ACTION_SEND`）∪ 动态枚举结果，
+     * 按包名去重（同包保留一条，label 优先 `loadLabel`、失败回落预设展示名）、按 label 排序、
+     * 排除本应用自身。
+     */
     fun candidates(context: Context): List<AskAiTarget> {
         val pm = context.packageManager
+        val seen = LinkedHashSet<String>()
+        val targets = ArrayList<AskAiTarget>()
+
+        // 预设：仅取已安装者（getApplicationInfo 包 try/catch 判定）
+        PRESET_TARGETS.forEach { preset ->
+            val pkg = preset.packageName
+            if (pkg == context.packageName) return@forEach
+            val appInfo = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()
+                ?: return@forEach
+            if (!seen.add(pkg)) return@forEach
+            val label = runCatching { appInfo.loadLabel(pm).toString() }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?: preset.label
+            targets.add(AskAiTarget(pkg, label))
+        }
+
+        // 动态枚举可接收 text/plain 的已安装应用
         val intent = Intent(Intent.ACTION_SEND).setType("text/plain")
         val resolved = runCatching { pm.queryIntentActivities(intent, 0) }.getOrDefault(emptyList())
-        val seen = LinkedHashSet<String>()
-        val targets = ArrayList<AskAiTarget>(resolved.size)
         resolved.forEach { info ->
             val pkg = info.activityInfo?.packageName ?: return@forEach
             // 排除本应用（防御性：本应用未注册 ACTION_SEND）+ 同包多 Activity 取首个

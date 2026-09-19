@@ -3,6 +3,8 @@ package com.sample.docreader.core.askai
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.ResolveInfo
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -100,4 +102,46 @@ class AskAiTest {
         )
         assertEquals(listOf("Alpha", "Zeta"), result.map { it.label })
     }
+    /**
+     * ⑥（2026-09-19 审查补：真机缺 `<queries>` 导致枚举只看到「朗读/蓝牙」）预设合并：
+     * 预设中已安装者即使**未注册** ACTION_SEND 也应出现在候选里；与枚举结果同包时按包名去重（只出现一次）。
+     */
+    @Test
+    fun tcUt19_candidates_includesInstalledPresets() {
+        val pm = shadowOf(context.packageManager)
+        fun install(pkg: String, label: String) {
+            pm.installPackage(
+                PackageInfo().apply {
+                    packageName = pkg
+                    applicationInfo = ApplicationInfo().apply {
+                        packageName = pkg
+                        nonLocalizedLabel = label
+                    }
+                }
+            )
+        }
+        // 预设包已安装但未注册 ACTION_SEND
+        install("com.deepseek.chat", "DeepSeek")
+        // 预设包既已安装又注册了 ACTION_SEND（应去重为一条）
+        install("com.larus.nova", "豆包")
+        val intent = Intent(Intent.ACTION_SEND).setType("text/plain")
+        pm.addResolveInfoForIntent(
+            intent,
+            ResolveInfo().apply {
+                activityInfo = ActivityInfo().apply {
+                    packageName = "com.larus.nova"
+                    name = "com.larus.nova.ShareActivity"
+                    nonLocalizedLabel = "豆包"
+                }
+            }
+        )
+        // 未安装的预设包不应出现（install 列表里没有它）
+        install("com.example.other", "Other")
+
+        val packages = AskAi.candidates(context).map { it.packageName }
+        assertTrue("已安装的预设即使未注册 ACTION_SEND 也应在候选内", packages.contains("com.deepseek.chat"))
+        assertEquals("预设与枚举同包应去重", 1, packages.count { it == "com.larus.nova" })
+        assertFalse("不应把本应用列为候选", packages.contains(context.packageName))
+    }
+
 }

@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- M18（F4.10）：Android 11+ 包可见性。非权限、无运行时申请；声明 SEND/text/plain 接收方
+         与预设包名，使「复制后问 AI」的目标应用枚举与 getApplicationInfo 可见。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <package android:name="com.deepseek.chat" />
+        <package android:name="com.larus.nova" />
+    </queries>
+
     <!-- U2（M10）：DayNight 主题（values/values-night 资源对），替代硬编码 Light -->
     <application
         android:allowBackup="true"
