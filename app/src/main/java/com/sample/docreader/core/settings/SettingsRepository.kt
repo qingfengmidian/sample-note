@@ -57,6 +57,10 @@ class SettingsRepository(
         val CUSTOM_FONT_PATH = stringPreferencesKey("custom_font_path")
         // F4.9/M16：应用内语言覆盖（BCP-47 标签 zh/en）；键缺失或值未知 = 跟随系统
         val APP_LANGUAGE = stringPreferencesKey("app_language")
+        // F4.10/M18：复制后问 AI（设计 REV18 §3.10）
+        val ASK_AI_ENABLED = booleanPreferencesKey("ask_ai_enabled")
+        val ASK_AI_TARGET_PACKAGE = stringPreferencesKey("ask_ai_target_package")
+        val ASK_AI_PREFIX = stringPreferencesKey("ask_ai_prefix") // 缺失 = 资源默认前缀；空串 = 原文直发
     }
 
     val settings: Flow<ReadingSettings> = dataStore.data.map { p ->
@@ -100,6 +104,36 @@ class SettingsRepository(
         dataStore.edit { p ->
             val tag = LocaleSwitcher.tagOf(language)
             if (tag == null) p.remove(Keys.APP_LANGUAGE) else p[Keys.APP_LANGUAGE] = tag
+        }
+    }
+
+    // ---- F4.10/M18：复制后问 AI（设计 REV18 §3.10；键级隔离，save(ReadingSettings) 不触碰）----
+
+    /** 功能总开关；键缺失 = 默认开 */
+    val askAiEnabled: Flow<Boolean> = dataStore.data.map { p -> p[Keys.ASK_AI_ENABLED] ?: true }
+
+    /** 目标应用包名；null = 未选择（不提示、不发送） */
+    val askAiTargetPackage: Flow<String?> = dataStore.data.map { p -> p[Keys.ASK_AI_TARGET_PACKAGE] }
+
+    /** 提问前缀；null = 缺失（用资源默认前缀），空串 = 原文直发 */
+    val askAiPrefix: Flow<String?> = dataStore.data.map { p -> p[Keys.ASK_AI_PREFIX] }
+
+    suspend fun saveAskAiEnabled(enabled: Boolean) {
+        dataStore.edit { p -> p[Keys.ASK_AI_ENABLED] = enabled }
+    }
+
+    /** 写入目标应用包名；null 移除键（回到「未选择」） */
+    suspend fun saveAskAiTargetPackage(packageName: String?) {
+        dataStore.edit { p ->
+            if (packageName == null) p.remove(Keys.ASK_AI_TARGET_PACKAGE)
+            else p[Keys.ASK_AI_TARGET_PACKAGE] = packageName
+        }
+    }
+
+    /** 写入提问前缀；null 移除键（回到资源默认前缀），空串 = 原文直发 */
+    suspend fun saveAskAiPrefix(prefix: String?) {
+        dataStore.edit { p ->
+            if (prefix == null) p.remove(Keys.ASK_AI_PREFIX) else p[Keys.ASK_AI_PREFIX] = prefix
         }
     }
 }
