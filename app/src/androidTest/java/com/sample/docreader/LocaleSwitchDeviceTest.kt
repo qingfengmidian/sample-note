@@ -4,7 +4,7 @@ import android.app.LocaleManager
 import android.content.Context
 import android.os.Build
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
@@ -130,16 +130,18 @@ class LocaleSwitchPickerDeviceTest {
 
     @Test
     fun tcUi18_settingsScreen_languagePickerCancel_keepsPersistedValue() {
-        // 首页 → 设置页
-        composeRule.onNodeWithContentDescription(appContext.getString(R.string.home_settings_cd))
+        // 首页 → 设置页（首页设置入口为 TextButton + 文本 home_settings_cd，无 contentDescription）
+        composeRule.onNodeWithText(appContext.getString(R.string.home_settings_cd))
             .performClick()
         composeRule.waitForIdle()
         // 语言行 → 选项对话框 → 选「English」→ 确认框
         composeRule.onNodeWithText(appContext.getString(R.string.settings_language)).performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithText(appContext.getString(R.string.settings_language_en)).performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithText(appContext.getString(R.string.settings_language_restart_message))
             .assertExists()
-        // 「取消」→ 持久值不变
+        // 「取消」→ 持久值不变（确认框与选项框共用 common_cancel：此时仅确认框在屏）
         composeRule.onNodeWithText(appContext.getString(R.string.common_cancel)).performClick()
         composeRule.waitForIdle()
         Thread.sleep(500)
