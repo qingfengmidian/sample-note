@@ -126,4 +126,22 @@
     <string name="editor_unsaved_message">Save changes to the file?</string>
     <string name="editor_save_success">Saved</string>
     <string name="editor_save_failed">Save failed. The file provider does not support writing or the file is not writable. Please use Save as.</string>
+
+    <!-- askai：复制后问 AI（F4.10/M18）。前缀默认值带尾随空格，须加引号保留（aapt 会裁未引号首尾空白） -->
+    <string name="settings_ask_ai_section">Ask AI</string>
+    <string name="settings_ask_ai_enabled">Enable \"Ask AI\"</string>
+    <string name="settings_ask_ai_enabled_desc">Shows an in-app hint after you copy text; sends the content to your chosen app only when you tap (this app stays offline)</string>
+    <string name="settings_ask_ai_target">Target app</string>
+    <string name="settings_ask_ai_target_none">Not selected</string>
+    <string name="settings_ask_ai_no_candidates">No app found that can receive text</string>
+    <string name="settings_ask_ai_prefix">Question prefix</string>
+    <string name="settings_ask_ai_prefix_default">"Explain: "</string>
+    <string name="settings_ask_ai_prefix_desc">Leave empty to send the text as is</string>
+    <string name="ask_ai_snackbar_action">Ask AI</string>
+    <string name="ask_ai_snackbar_message">Copied: %1$s</string>
+    <string name="ask_ai_clipboard_empty">No text available in the clipboard</string>
+    <string name="ask_ai_no_target">Choose a target app in Settings first</string>
+    <string name="ask_ai_send_failed">Target app unavailable; choose another in Settings</string>
+    <string name="ask_ai_disabled">Ask AI is off. You can enable it in Settings</string>
+    <string name="reader_menu_ask_ai">Ask AI</string>
 </resources>

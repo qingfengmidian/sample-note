@@ -43,7 +43,7 @@
 - `setContent` 内：`AppTheme { Box { NavHost(...) ; SnackbarHost(hostState, Modifier.align(Alignment.BottomCenter)) } }`（`SnackbarHostState` 经 `remember`）。
 - 剪贴板监听封装为私有 composable（如 `AskAiClipboardEffect`）：`LifecycleResumeEffect`（`androidx.lifecycle.compose`，依赖已有）在 RESUMED 注册 `ClipboardManager.OnPrimaryClipChangedListener`、其它状态注销；回调内取 `clipboard.primaryClip` → `coerceToText(context)` → `trim()` → `AskAi.shouldOffer(...)`；通过则更新 `lastOffered` 并 `snackbarHostState.showSnackbar(message, actionLabel, duration = Short)`。
 - action（=「问 AI」）点击 → `AskAi.send(context, target, AskAi.composePayload(prefix, 资源默认前缀, text))`；返回 false → 错误 Snackbar「目标应用不可用，请在设置中重新选择」。
-- 三个设置值经 `SettingsRepository` 收集（`collectAsStateWithLifecycle`），资源默认前缀取 `stringResource(R.string.ask_ai_default_prefix)`。
+- 三个设置值经 `SettingsRepository` 收集（`collectAsStateWithLifecycle`），资源默认前缀取 `stringResource(R.string.settings_ask_ai_prefix_default)`。
 - **阅读器菜单兜底**：`ReaderScreen` 新增回调参数 `onAskAi: () -> Unit`，⋮ 菜单在「阅读设置」之后加「问 AI」项（`reader_menu_ask_ai`）；`MainActivity` 传入的处理逻辑：读剪贴板 → 空则提示「剪贴板没有可用文本」→ 未选目标则提示「请先在设置中选择目标应用」→ 否则同 2.3 发送路径（同样失败提示）。
 
 ### 2.4 设置页「问 AI」小节（`SettingsScreen.kt`）
@@ -78,7 +78,8 @@
 
 zh 对应值：问 AI / 启用「问 AI」/ 复制文本后应用内提示，点按才把内容发给所选应用（应用自身不联网）/ 目标应用 / 未选择 / 未发现可接收文本的应用 / 提问前缀 / 请解释：/ 留空则原文直发 / 问 AI / 已复制：%1$s / 剪贴板没有可用文本 / 请先在设置中选择目标应用 / 目标应用不可用，请在设置中重新选择 / 问 AI。
 
-> 键名注意：默认前缀键在设计中写作 `ask_ai_default_prefix`，本文简报名为 `settings_ask_ai_prefix_default` —— **以实现时二者取一为准并在报告中注明**（`LocalizationTest` 键集对等会自动覆盖）。
+> 键名定稿（2026-09-19 审查处置）：默认前缀键取 **`settings_ask_ai_prefix_default`**，设计 §3.10 已同步回写为同名（英文值带尾随空格，资源中加引号保留）。
+> 键数勘误：本简报原写「各 16 新键」，实测**各 15 键**（实现报告 §1.5 勘误，`LocalizationTest` 键集对等覆盖）。
 
 ## 3. 测试口径（红测试已先行）
 

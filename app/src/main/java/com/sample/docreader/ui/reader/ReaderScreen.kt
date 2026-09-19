@@ -123,7 +123,9 @@ fun ReaderScreen(
     format: DocFormat,
     onBack: () -> Unit,
     displayName: String? = null,
-    onEdit: () -> Unit = {}
+    onEdit: () -> Unit = {},
+    // F4.10/M18：⋮ 菜单「问 AI」兜底入口，剪贴板文本与发送由 MainActivity 统一处理
+    onAskAi: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: ReaderViewModel = viewModel(factory = viewModelFactory {
@@ -210,7 +212,8 @@ fun ReaderScreen(
         onEnsureMaterialized = viewModel::ensureMaterialized,
         onTocJumpToItem = viewModel::onTocJumpToItem,
         onRestoreItemConsumed = viewModel::consumeRestoreItem,
-        onEdit = onEdit
+        onEdit = onEdit,
+        onAskAi = onAskAi
     )
 }
 
@@ -247,7 +250,9 @@ fun ReaderContent(
     onAppendNextChapter: (() -> Unit)? = null,
     onEnsureMaterialized: ((Int) -> Unit)? = null,
     onTocJumpToItem: ((Int) -> Unit)? = null,
-    onRestoreItemConsumed: (() -> Unit)? = null
+    onRestoreItemConsumed: (() -> Unit)? = null,
+    // F4.10/M18：⋮ 菜单「问 AI」兜底入口
+    onAskAi: (() -> Unit)? = null
 ) {
     val settings = state.settings
     val theme = resolveReadingTheme(settings.theme)
@@ -510,6 +515,18 @@ fun ReaderContent(
                             onClick = {
                                 menuOpen = false
                                 settingsSheetOpen = true
+                            }
+                        )
+                        // F4.10/M18：问 AI 兜底入口（在「阅读设置」之后），走 MainActivity 统一发送路径
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.reader_menu_ask_ai)) },
+                            colors = MenuDefaults.itemColors(
+                                textColor = theme.foreground,
+                                disabledTextColor = theme.foreground.copy(alpha = 0.38f)
+                            ),
+                            onClick = {
+                                menuOpen = false
+                                onAskAi?.invoke()
                             }
                         )
                     }

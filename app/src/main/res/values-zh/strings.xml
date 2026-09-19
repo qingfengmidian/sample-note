@@ -126,4 +126,22 @@
     <string name="editor_unsaved_message">是否保存对文件的修改？</string>
     <string name="editor_save_success">已保存</string>
     <string name="editor_save_failed">保存失败，文件提供方不支持写入或文件不可写，请另存为</string>
+
+    <!-- askai：复制后问 AI（F4.10/M18） -->
+    <string name="settings_ask_ai_section">问 AI</string>
+    <string name="settings_ask_ai_enabled">启用「问 AI」</string>
+    <string name="settings_ask_ai_enabled_desc">复制文本后应用内提示，点按才把内容发给所选应用（应用自身不联网）</string>
+    <string name="settings_ask_ai_target">目标应用</string>
+    <string name="settings_ask_ai_target_none">未选择</string>
+    <string name="settings_ask_ai_no_candidates">未发现可接收文本的应用</string>
+    <string name="settings_ask_ai_prefix">提问前缀</string>
+    <string name="settings_ask_ai_prefix_default">请解释：</string>
+    <string name="settings_ask_ai_prefix_desc">留空则原文直发</string>
+    <string name="ask_ai_snackbar_action">问 AI</string>
+    <string name="ask_ai_snackbar_message">已复制：%1$s</string>
+    <string name="ask_ai_clipboard_empty">剪贴板没有可用文本</string>
+    <string name="ask_ai_no_target">请先在设置中选择目标应用</string>
+    <string name="ask_ai_send_failed">目标应用不可用，请在设置中重新选择</string>
+    <string name="ask_ai_disabled">「问 AI」已关闭，可在设置中开启</string>
+    <string name="reader_menu_ask_ai">问 AI</string>
 </resources>

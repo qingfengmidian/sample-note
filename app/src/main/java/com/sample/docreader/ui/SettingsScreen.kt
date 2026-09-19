@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sample.docreader.R
+import com.sample.docreader.core.askai.AskAi
 import com.sample.docreader.core.model.AppLanguage
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingSettings
@@ -71,6 +73,14 @@ fun SettingsScreen(onBack: () -> Unit) {
     val settings by repository.settings.collectAsStateWithLifecycle(initialValue = ReadingSettings())
     // F4.9/M16：语言覆盖与阅读设置键级隔离，故单独订阅（缺失/未知标签 = 跟随系统）
     val language by repository.appLanguage.collectAsStateWithLifecycle(initialValue = AppLanguage.SYSTEM)
+    // F4.10/M18：问 AI 三键与阅读设置键级隔离，同样单独订阅
+    val askAiEnabled by repository.askAiEnabled.collectAsStateWithLifecycle(initialValue = true)
+    val askAiTarget by repository.askAiTargetPackage.collectAsStateWithLifecycle(initialValue = null)
+    val askAiPrefix by repository.askAiPrefix.collectAsStateWithLifecycle(initialValue = null)
+    // 资源默认前缀：仅用于「从未设置过」（null）时输入框的初值展示
+    val askAiDefaultPrefix = stringResource(R.string.settings_ask_ai_prefix_default)
+    // 候选应用动态枚举（设计 §3.10-2：仅设置页打开与发送失败回退时调用，量小，不做缓存）
+    val askAiCandidates = remember { AskAi.candidates(context) }
     val scope = rememberCoroutineScope()
     var message by remember { mutableStateOf<String?>(null) }
     // M17（F4.9/决策 D-2026-09-19-02）：语言选项选定但尚未确认的档位；非空即弹确认重启框
@@ -239,6 +249,35 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onExpandedChange = { open -> openPicker = if (open) SettingsPicker.THEME else null },
                 showValue = showRowValues
             )
+            // F4.10/M18（设计 REV18 §3.10-4）：问 AI 小节，位于「编辑器」之后。
+            // 简报 §2.4 要求再置于「阅读默认值」之前，但那会把「默认字号」行挤出 Robolectric 默认可视区，
+            // 使既有 SettingsGlobalTest 的无滚动 performClick 失效（该测试不可改，见其类注释与 L182 既有约定），
+            // 故小节落在「阅读默认值」之后、列尾——仍在「编辑器」之后，且不回归既有用例（报告已注明取舍）。
+            Text(stringResource(R.string.settings_ask_ai_section), style = MaterialTheme.typography.titleSmall)
+            AskAiToggleRow(
+                checked = askAiEnabled,
+                onCheckedChange = { enabled ->
+                    scope.launch { repository.saveAskAiEnabled(enabled) }
+                }
+            )
+            OptionPickerRow(
+                title = stringResource(R.string.settings_ask_ai_target),
+                value = askAiCandidates.firstOrNull { it.packageName == askAiTarget }?.label
+                    ?: stringResource(R.string.settings_ask_ai_target_none),
+                options = askAiCandidates,
+                optionLabel = { it.label },
+                isSelected = { it.packageName == askAiTarget },
+                onSelect = { target -> scope.launch { repository.saveAskAiTargetPackage(target.packageName) } },
+                expanded = openPicker == SettingsPicker.ASK_AI_TARGET,
+                onExpandedChange = { open -> openPicker = if (open) SettingsPicker.ASK_AI_TARGET else null },
+                showValue = showRowValues,
+                emptyText = stringResource(R.string.settings_ask_ai_no_candidates)
+            )
+            AskAiPrefixRow(
+                prefix = askAiPrefix,
+                defaultPrefix = askAiDefaultPrefix,
+                onValueChange = { text -> scope.launch { repository.saveAskAiPrefix(text) } }
+            )
 
             // M17（F4.9/决策 D-2026-09-19-02）：语言确认重启框；「取消」不落库，「立即重启」先落库再重建
             pendingLanguage?.let { target ->
@@ -297,6 +336,71 @@ internal fun AutoSaveRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
             onCheckedChange = onCheckedChange,
             modifier = Modifier.semantics { contentDescription = autoSaveCd }
         )
+    }
+}
+
+/**
+ * 「启用问 AI」开关行（F4.10/M18，设计 REV18 §3.10-4）：开关 cd 与行文本同串（红测试经 cd 点击），
+ * 说明文案为第二行小字；可点击目标 ≥ 48dp。
+ */
+@Composable
+private fun AskAiToggleRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val enabledCd = stringResource(R.string.settings_ask_ai_enabled)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.settings_ask_ai_enabled), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                stringResource(R.string.settings_ask_ai_enabled_desc),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.semantics { contentDescription = enabledCd }
+        )
+    }
+}
+
+/**
+ * 「提问前缀」输入行（F4.10/M18，设计 REV18 §3.10-4）：输入框 cd 与行文本同串（红测试经 cd 聚焦/输入）。
+ *
+ * 语义区分（简报 §2.4）：持久值 `prefix == null`（从未设置）= 用资源默认前缀填充显示；
+ * 用户清空为 `""` = 原文直发；非空 = 自定义前缀。初值随持久值变化（remember(prefix)）。
+ */
+@Composable
+private fun AskAiPrefixRow(
+    prefix: String?,
+    defaultPrefix: String,
+    onValueChange: (String) -> Unit
+) {
+    val prefixCd = stringResource(R.string.settings_ask_ai_prefix)
+    var text by remember(prefix) { mutableStateOf(prefix ?: defaultPrefix) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
+    ) {
+        Text(stringResource(R.string.settings_ask_ai_prefix), style = MaterialTheme.typography.bodyMedium)
+        BasicTextField(
+            value = text,
+            onValueChange = {
+                text = it
+                onValueChange(it)
+            },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = prefixCd }
+                .padding(vertical = 4.dp)
+        )
+        Text(stringResource(R.string.settings_ask_ai_prefix_desc), style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -371,7 +475,7 @@ private fun FontSizeSettingRow(fontSizeSp: Int, onStep: (Int) -> Unit) {
  * 设置页五个选项列表行（M17，单一对话框状态源；任一对话框打开时隐藏全部背景行值语义，
  * 避免与对话框选项文本在语义树重复——如语言行值「跟随系统」与主题对话框选项同字面）。
  */
-private enum class SettingsPicker { LANGUAGE, LINE_HEIGHT, WRAP, FONT, THEME }
+private enum class SettingsPicker { LANGUAGE, LINE_HEIGHT, WRAP, FONT, THEME, ASK_AI_TARGET }
 
 /**
  * 选项列表设置行（M17，F4.3/TC-UI-19，决策 D-2026-09-19-01）：整行可点（≥48dp），行尾显示当前值；
@@ -391,6 +495,8 @@ private fun <T> OptionPickerRow(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     showValue: Boolean,
+    // F4.10/M18：候选为空时的对话框空态文案（默认 null 保持既有五个调用方行为不变）
+    emptyText: String? = null,
 ) {
     Row(
         modifier = Modifier
@@ -413,6 +519,10 @@ private fun <T> OptionPickerRow(
             title = { Text(title) },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    // F4.10/M18：无候选（如 Robolectric 或未安装可接收文本的应用）时显示空态文案
+                    if (options.isEmpty() && emptyText != null) {
+                        Text(emptyText, style = MaterialTheme.typography.bodyMedium)
+                    }
                     options.forEach { option ->
                         Row(
                             modifier = Modifier
