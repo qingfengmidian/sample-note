@@ -4,7 +4,7 @@
 | --- | --- |
 | 日期 | 2026-09-19 |
 | 环境 | OPPO PHM110 真机（Android 13 / API 33，系统语言中文） |
-| 状态 | ✅ **验收通过**：设备端 3/3 + 全量套件 17 例 0 失败、D15 走查全过、单测 281/0/1skip；**用户终审与 `m17` tag 待确认** |
+| 状态 | ✅ **验收通过（2026-09-19）**：设备端 3/3 + 全量套件 17 例 0 失败、D15 走查全过、单测 281/0/1skip；**用户终审通过**，tag `m17` |
 | 范围 | F4.3/F4.9 交互修订（需求 REV13 / 设计 REV17 §3.7 M17 块 / 测试用例 REV12 / 决策 D-2026-09-19-01/02） |
 | 交付提交 | `136856c` 框定 → `8cbcffb` 红测试（8 红 2 绿）→ `db99531` 实现（OpenCode + Kimi 审查处置）→ `dcfb650` 设备端 import 修复 → `9e84f78` §8.5 复核处置 → 本批（设备端用例点击目标修正 + 验收记录） |
 | 依据 | `docs/collab/briefs/m17-settings-option-pickers.md`、`reviews/m17-opencode-report.md`、`m17-review.md`、`m17-opencode-review.md`、`m17-opencode-response.md` |
@@ -38,4 +38,4 @@
 
 1. **S3 记录不修**：`common_switch` 未用键（需中英同删）、`ReaderViewModel.cycle*` 仅测试调用——留待后续资源/测试清理批次（用例数下降需显式接受）。
 2. 设备端首轮两处测试自身缺陷已修：`LocaleSwitchDeviceTest` 补 `flow.first` 导入（`dcfb650`）、M17 增补用例点击目标由 contentDescription 改为首页设置入口实际文本（本批）。
-3. `m17` tag：按惯例待用户终审通过后打点。
+3. `m17` tag：已按惯例于用户终审通过后打点。
