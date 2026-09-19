@@ -1,19 +1,19 @@
 package com.sample.docreader.ui
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
-import com.sample.docreader.R
 import com.sample.docreader.core.model.AppLanguage
 import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -23,12 +23,13 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * TC-UI-17（M16，F4.9）设置页语言行（Robolectric，红测试先行）。
+ * TC-UI-17（M16，F4.9；M17 REV12 改写）设置页语言切换交互（Robolectric，红测试先行）。
  *
- * 语义契约（沿用 SettingsGlobalTest 的循环行约定）：语言行 = `CycleSettingRow`，
- * 切换按钮 contentDescription 与行文本同名「语言」；行值显示当前档位标签
- * （跟随系统 / 中文 / English）；点击沿档位前进并即时持久化。
- * 注：zh 下「跟随系统」与阅读主题档位标签同字面，故断言取「语言」语义键与「中文」行值，避免多节点歧义。
+ * M17 契约（决策 D-2026-09-19-02）：
+ * ① 点「语言」行 → 唤出语言选项对话框（跟随系统/中文/English 三项，当前值选中）；
+ * ② 选「English」→ 弹确认框「切换语言需要重启应用，是否立即重启？」（立即重启/取消）；
+ * ③ 「取消」→ 不做任何持久化；④ 「立即重启」→ 先落库再重建，持久化为 EN。
+ * 断言用 zh 字面量（与既有 Robolectric zh 口径一致）；红态为「点击唤不出对话框」必然失败。
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -51,36 +52,93 @@ class SettingsLanguageUiTest {
         runBlocking { repository.saveAppLanguage(AppLanguage.SYSTEM) }
     }
 
-    /** 语言行存在（含「通用」小节与切换按钮语义键） */
+    /** ① 语言行存在（「通用」小节 + 行标题） */
     @Test
     fun tcUi17_settingsScreen_showsLanguageRow() {
         composeRule.setContent { SettingsScreen(onBack = {}) }
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText(context.getString(R.string.settings_general_section)).assertExists()
-        composeRule.onNodeWithContentDescription(context.getString(R.string.settings_language)).assertExists()
+        composeRule.onNodeWithText("通用").assertExists()
+        composeRule.onNodeWithText("语言").assertExists()
     }
 
-    /** 点击语言行：档位前进（跟随系统 → 中文）并即时持久化，行值随动 */
+    /** ② 点语言行 → 选项对话框列出三项语言，当前值「跟随系统」选中 */
     @Test
-    fun tcUi17_languageRowClick_persistsNextLanguage() {
+    fun tcUi17_languageRow_opensOptionDialog() {
         composeRule.setContent { SettingsScreen(onBack = {}) }
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithContentDescription(context.getString(R.string.settings_language)).performClick()
+        composeRule.onNodeWithText("语言").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("跟随系统").assertExists()
+        composeRule.onNodeWithText("中文").assertExists()
+        composeRule.onNodeWithText("English").assertExists()
+        val hasSelected = composeRule.onAllNodesWithText("跟随系统")
+            .fetchSemanticsNodes()
+            .any { it.config[SemanticsProperties.Selected] == true }
+        assertTrue("当前值「跟随系统」应以选中态标记", hasSelected)
+    }
+
+    /** ③ 选「English」→ 确认框出现；语言选项对话框已关闭 */
+    @Test
+    fun tcUi17_selectEnglish_showsRestartConfirmDialog() {
+        composeRule.setContent { SettingsScreen(onBack = {}) }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("语言").performClick()
+        composeRule.onNodeWithText("English").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("切换语言需要重启应用，是否立即重启？").assertExists()
+        composeRule.onNodeWithText("立即重启").assertExists()
+        composeRule.onNodeWithText("取消").assertExists()
+        // 选项对话框已关闭：「跟随系统」仅剩主界面行值一处
+        assertEquals(
+            "语言选项对话框应已关闭",
+            1,
+            composeRule.onAllNodesWithText("跟随系统").fetchSemanticsNodes().size
+        )
+    }
+
+    /** ④ 确认框「取消」→ 持久值保持「跟随系统」不落库 */
+    @Test
+    fun tcUi17_confirmCancel_keepsPersistedValue() {
+        composeRule.setContent { SettingsScreen(onBack = {}) }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("语言").performClick()
+        composeRule.onNodeWithText("English").performClick()
+        composeRule.onNodeWithText("取消").performClick()
+        composeRule.waitForIdle()
+
+        // 给潜在的错误异步写入留出落盘窗口后断言「未变」
+        Thread.sleep(500)
+        assertEquals(
+            "取消后不应持久化语言变更",
+            AppLanguage.SYSTEM,
+            runBlocking { repository.appLanguage.first() }
+        )
+    }
+
+    /** ⑤ 确认框「立即重启」→ 持久化为 EN（先落库再重建；compose 测试上下文非 Activity 不会真重建） */
+    @Test
+    fun tcUi17_confirmRestart_persistsEnglish() {
+        composeRule.setContent { SettingsScreen(onBack = {}) }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("语言").performClick()
+        composeRule.onNodeWithText("English").performClick()
+        composeRule.onNodeWithText("立即重启").performClick()
+        composeRule.waitForIdle()
 
         val deadline = System.currentTimeMillis() + 5_000
         var persisted = AppLanguage.SYSTEM
         while (System.currentTimeMillis() < deadline) {
             persisted = runBlocking { repository.appLanguage.first() }
-            if (persisted != AppLanguage.SYSTEM) break
+            if (persisted == AppLanguage.EN) break
             Thread.sleep(50)
         }
-        assertEquals("语言行点击后应沿档位持久化（跟随系统 → 中文）", AppLanguage.ZH, persisted)
-
-        composeRule.waitUntil(timeoutMillis = 5_000) {
-            composeRule.onAllNodesWithText(context.getString(R.string.settings_language_zh))
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        assertEquals("「立即重启」后应持久化为 English", AppLanguage.EN, persisted)
     }
 }

@@ -81,14 +81,6 @@ class LocaleSwitchTest {
         assertEquals(AppLanguage.SYSTEM, LocaleSwitcher.languageOf("de"))
     }
 
-    /** ③ 档位循环：跟随系统 → 中文 → English → 跟随系统 */
-    @Test
-    fun tcUi17_languageCycle_systemZhEn() {
-        assertEquals(AppLanguage.ZH, LocaleSwitcher.next(AppLanguage.SYSTEM))
-        assertEquals(AppLanguage.EN, LocaleSwitcher.next(AppLanguage.ZH))
-        assertEquals(AppLanguage.SYSTEM, LocaleSwitcher.next(AppLanguage.EN))
-    }
-
     /** ④ 持久化：写入即读回；回写「跟随系统」清除覆盖 */
     @Test
     fun tcUi17_saveAppLanguage_persistsAndClears() = runBlocking {

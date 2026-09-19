@@ -3,6 +3,10 @@ package com.sample.docreader
 import android.app.LocaleManager
 import android.content.Context
 import android.os.Build
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -88,5 +93,59 @@ class LocaleSwitchDeviceTest {
             scenario.onActivity { language = it.resources.configuration.locales[0].language }
         }
         return language
+    }
+}
+
+/**
+ * TC-UI-18（M17 增补，决策 D-2026-09-19-02）设置页真实导航：语言行 → 选项对话框 → 选「English」
+ * → 确认框「取消」→ 持久值不变（判别力与系统语言无关，红测试先行）。
+ * 字符串断言经 `getString` 读取（设备 locale 不可控）；用例结束恢复「跟随系统」。
+ */
+@RunWith(AndroidJUnit4::class)
+class LocaleSwitchPickerDeviceTest {
+
+    @get:Rule
+    val composeRule = createAndroidComposeRule<MainActivity>()
+
+    private val appContext: Context get() = ApplicationProvider.getApplicationContext()
+
+    private val repository: SettingsRepository get() = SettingsRepository(appContext)
+
+    @Before
+    fun clearBefore() {
+        runBlocking { repository.saveAppLanguage(AppLanguage.SYSTEM) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            LocaleSwitcher.applyToFramework(appContext, AppLanguage.SYSTEM)
+        }
+    }
+
+    @After
+    fun restoreFollowSystem() {
+        runBlocking { repository.saveAppLanguage(AppLanguage.SYSTEM) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            LocaleSwitcher.applyToFramework(appContext, AppLanguage.SYSTEM)
+        }
+    }
+
+    @Test
+    fun tcUi18_settingsScreen_languagePickerCancel_keepsPersistedValue() {
+        // 首页 → 设置页
+        composeRule.onNodeWithContentDescription(appContext.getString(R.string.home_settings_cd))
+            .performClick()
+        composeRule.waitForIdle()
+        // 语言行 → 选项对话框 → 选「English」→ 确认框
+        composeRule.onNodeWithText(appContext.getString(R.string.settings_language)).performClick()
+        composeRule.onNodeWithText(appContext.getString(R.string.settings_language_en)).performClick()
+        composeRule.onNodeWithText(appContext.getString(R.string.settings_language_restart_message))
+            .assertExists()
+        // 「取消」→ 持久值不变
+        composeRule.onNodeWithText(appContext.getString(R.string.common_cancel)).performClick()
+        composeRule.waitForIdle()
+        Thread.sleep(500)
+        org.junit.Assert.assertEquals(
+            "取消后不应持久化语言变更",
+            AppLanguage.SYSTEM,
+            runBlocking { repository.appLanguage.first() }
+        )
     }
 }

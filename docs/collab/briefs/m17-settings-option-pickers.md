@@ -30,7 +30,7 @@ private fun <T> OptionPickerRow(
 ```
 
 - 整行可点（`defaultMinSize(minHeight = 48.dp)`，行尾不再放「切换」按钮；行右侧仍显示当前值文本）。
-- 点击 → `AlertDialog`：标题 = 行标题文本；正文 = 选项纵向列表，每项一行 `Row`（`RadioButton(selected = isSelected(option))` + 选项文本），整行可点（≥48dp），点选 → `onSelect(option)` + 关闭对话框。
+- 点击 → `AlertDialog`：标题 = 行标题文本；正文 = 选项纵向列表，每项一行（`Modifier.selectable(selected = isSelected(option), onClick = ...)`,≥48dp，`RadioButton` 仅作视觉指示或不放均可——**选中语义须落在整行 selectable 上**，合并语义树使 `onNodeWithText(选项).assertIsSelected()` 直接可用，这是红测试的判别依据），点选 → `onSelect(option)` + 关闭对话框。
 - 「取消」按钮（`common_cancel`）仅关闭对话框。
 - 选项行 RadioButton 自带选中语义，无需额外语义键。
 
