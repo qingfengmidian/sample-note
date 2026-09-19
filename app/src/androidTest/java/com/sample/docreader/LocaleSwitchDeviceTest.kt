@@ -13,6 +13,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sample.docreader.core.model.AppLanguage
 import com.sample.docreader.core.settings.LocaleSwitcher
 import com.sample.docreader.core.settings.SettingsRepository
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
