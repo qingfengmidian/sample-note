@@ -10,11 +10,13 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.sample.docreader.core.model.ReadingTheme
+import com.sample.docreader.core.model.ReadingSettings
 import com.sample.docreader.core.settings.SettingsRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,8 +28,9 @@ import org.robolectric.annotation.GraphicsMode
  * TC-UI-19（M17，F4.3，决策 D-2026-09-19-01）设置项选项列表交互（Robolectric，红测试先行）。
  *
  * 契约（替代原 TC-F4-03 循环用例 SettingsGlobalCycleTest）：点击设置行唤出单选对话框——
- * 对话框列出**全部**可选值、当前值以选中态标记（选项行 `Modifier.selectable`，
- * 合并语义树上 `assertIsSelected` 直接可用）、点选即持久化并关闭对话框。
+ * 对话框列出**全部**可选值、当前值以选中态标记（选项行 `Modifier.selectable`，选中语义落在整行
+ * 合并节点上）；「当前值选中」断言用 `hasText + expectValue(Selected, true)` 联合匹配（S4/kdoc 订正：
+ * 背景行值与选项同字面，单匹配断言会被双节点卡死）。点选即持久化并关闭对话框。
  * 行距/主题各一例覆盖 `OptionPickerRow` 通用组件；换行模式/字体行同组件对称实现。
  * 单独成类：Robolectric 沙盒按类隔离，避免 settings DataStore 跨用例串文件。
  */
@@ -38,6 +41,15 @@ class SettingsLineHeightPickerTest {
 
     @get:Rule
     val composeRule = createComposeRule()
+
+    /** S4 加固：显式重置默认值，隔离不依赖「Robolectric 每方法重建 Application」的生产实现细节 */
+    @Before
+    fun resetDefaults() {
+        runBlocking {
+            SettingsRepository(ApplicationProvider.getApplicationContext<android.content.Context>())
+                .save(ReadingSettings())
+        }
+    }
 
     /** ① 点「默认行距」行 → 对话框列出 120/150/180/200% 全部四档，当前值 150% 选中 */
     @Test
@@ -94,6 +106,15 @@ class SettingsThemePickerTest {
 
     @get:Rule
     val composeRule = createComposeRule()
+
+    /** S4 加固：显式重置默认值（主题默认 null = 跟随系统），隔离不依赖生产实现细节 */
+    @Before
+    fun resetDefaults() {
+        runBlocking {
+            SettingsRepository(ApplicationProvider.getApplicationContext<android.content.Context>())
+                .save(ReadingSettings())
+        }
+    }
 
     /** ③ 点「默认阅读主题」行 → 对话框列出五档，当前值「跟随系统」为选中态 */
     @Test

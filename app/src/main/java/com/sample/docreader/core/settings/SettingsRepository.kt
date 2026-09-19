@@ -24,14 +24,17 @@ import kotlinx.coroutines.flow.map
  */
 private val settingsDataStores = java.util.WeakHashMap<Context, DataStore<Preferences>>()
 
-private fun Context.settingsDataStore(): DataStore<Preferences> =
-    synchronized(settingsDataStores) {
-        settingsDataStores.getOrPut(applicationContext) {
+private fun Context.settingsDataStore(): DataStore<Preferences> {
+    // 先取局部：produceFile 闭包只持有 Application，不捕获调用方（可能为 Activity）上下文（§8.5 复核 S1）
+    val appContext = applicationContext
+    return synchronized(settingsDataStores) {
+        settingsDataStores.getOrPut(appContext) {
             PreferenceDataStoreFactory.create(
-                produceFile = { applicationContext.preferencesDataStoreFile("settings") }
+                produceFile = { appContext.preferencesDataStoreFile("settings") }
             )
         }
     }
+}
 
 /**
  * 全局阅读/显示设置仓库（DataStore Preferences）。

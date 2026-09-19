@@ -56,6 +56,8 @@
 
 ## 5. 遗留观察
 
+0. **终稿修订注记（2026-09-19，Kimi 审查后）**：§1「测试」称「红测试零改动」指本 OpenCode 实施过程未改测试；`db99531` 中两处测试断言（`SettingsOptionPickerTest` ①、`SettingsLanguageUiTest` ③）由 Kimi 审查时强化（见 `m17-review.md` §2.2/§3）。§4-决策 2「语言行值显示待确认档位」已在终稿移除（行值只显示已落库档位）；§4-决策 1「模态隔离语义」经 Kimi 移除实验证明为必要实现后保留（`assertExists` 为严格单匹配，见 `m17-review.md` §2.1）。§8.5 复核 S1（produceFile 闭包捕获）已按建议修复为先取局部 `appContext`。
+
 1. **`common_switch` 键已无引用**：`CycleSettingRow` 删除后 `R.string.common_switch` 成为未使用键（键集对等测试不受影响）。为不扩大改动面未删除；如需清理应中英同删。
 2. **`ReaderViewModel.cycle*` 保留**（见 §2）：当前仅测试调用，属「测试专用」生产方法，后续可评估随 `ReaderViewModelTest` 一并清理。
 3. **真机待验**：选项对话框五行实际观感（选项间距/滚动、RadioButton 与选中态）、语言「取消」不落库与「立即重启」先落库再重建的真机行为、低版本（26~32）确认重启后的自重建路径，均需真机/设备端验收。
