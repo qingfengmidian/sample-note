@@ -463,43 +463,13 @@ class ReaderViewModel(
         viewModelScope.launch { settingsRepository.save(newSettings) }
     }
 
-    fun toggleWrap() = updateSettings {
-        it.copy(wrapMode = if (it.wrapMode == WrapMode.WRAP) WrapMode.NO_WRAP else WrapMode.WRAP)
-    }
-
     /** 字号档位步进（12/14/16/18/20/22/24），到端点不变 */
     fun stepFontSize(delta: Int) = updateSettings {
         val index = FONT_SIZE_STEPS.indexOf(it.fontSizeSp).coerceAtLeast(0)
         it.copy(fontSizeSp = FONT_SIZE_STEPS[(index + delta).coerceIn(0, FONT_SIZE_STEPS.lastIndex)])
     }
 
-    /** 行距档位循环：120→150→180→200 */
-    fun cycleLineHeight() = updateSettings {
-        val index = LINE_HEIGHT_STEPS.indexOf(it.lineHeightPercent)
-        it.copy(lineHeightPercent = LINE_HEIGHT_STEPS[(index + 1).mod(LINE_HEIGHT_STEPS.size)])
-    }
-
-    /**
-     * 字体循环（SettingsScreen 循环入口用）：代码→衬线→无衬线；
-     * G2（M10）：customFontPath 非空时序列追加 CUSTOM（代码→衬线→无衬线→自定义→回到代码）。
-     */
-    fun cycleFont() = updateSettings {
-        val order = if (it.customFontPath != null) {
-            listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS, ReaderFont.CUSTOM)
-        } else {
-            listOf(ReaderFont.CODE, ReaderFont.SERIF, ReaderFont.SANS)
-        }
-        it.copy(font = order[(order.indexOf(it.font) + 1).mod(order.size)])
-    }
-
-    /** 主题循环：跟随系统→默认白→护眼绿→柔光米黄→夜间黑 */
-    fun cycleTheme() = updateSettings {
-        val order = listOf(null, ReadingTheme.DEFAULT, ReadingTheme.EYE_CARE,
-            ReadingTheme.SOFT_LIGHT, ReadingTheme.NIGHT)
-        it.copy(theme = order[(order.indexOf(it.theme) + 1).mod(order.size)])
-    }
-
-    // ---- M10 阅读设置面板（F4.4）：直接设置方法（U3 单选/分段选择替代循环）；语义与 cycle/step 一致，即时生效并持久化 ----
+    // ---- M10 阅读设置面板（F4.4）：直接设置方法（U3 单选/分段选择替代循环）；语义与 step 一致，即时生效并持久化 ----
 
     /** 直接设置换行模式（阅读设置面板分段选择，F4.4） */
     fun setWrapMode(mode: WrapMode) = updateSettings { it.copy(wrapMode = mode) }

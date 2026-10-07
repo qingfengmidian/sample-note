@@ -11,7 +11,6 @@
     <string name="common_save">保存</string>
     <string name="common_discard">放弃</string>
     <string name="common_delete">删除</string>
-    <string name="common_switch">切换</string>
     <string name="common_restart_now">立即重启</string>
     <string name="common_state_selected">已选中</string>
     <string name="common_state_unselected">未选中</string>

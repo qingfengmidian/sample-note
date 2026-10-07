@@ -8,7 +8,6 @@ import com.sample.docreader.core.model.DocFormat
 import com.sample.docreader.core.model.ParseException
 import com.sample.docreader.core.model.ReaderFont
 import com.sample.docreader.core.model.ReadingTheme
-import com.sample.docreader.core.model.WrapMode
 import com.sample.docreader.core.progress.ProgressRepository
 import com.sample.docreader.core.recent.AppDatabase
 import com.sample.docreader.core.settings.SettingsRepository
@@ -328,7 +327,7 @@ class ReaderViewModelTest {
         val (vm, repo) = newViewModel(this)
         advanceUntilIdle()
         vm.stepFontSize(1)   // 16 → 18
-        vm.cycleTheme()      // 跟随系统 → 默认白
+        vm.setTheme(ReadingTheme.DEFAULT) // 跟随系统 → 默认白
         // 即时生效
         assertEquals(18, vm.uiState.value.settings.fontSizeSp)
         assertEquals(ReadingTheme.DEFAULT, vm.uiState.value.settings.theme)
@@ -342,17 +341,9 @@ class ReaderViewModelTest {
     }
 
     @Test
-    fun wrapToggle_andCycles_followSpecSteps() = runTest {
+    fun fontSizeStep_endpointNoOverflow() = runTest {
         val (vm, _) = newViewModel(this)
         advanceUntilIdle()
-        vm.toggleWrap()
-        assertEquals(WrapMode.NO_WRAP, vm.uiState.value.settings.wrapMode)
-        vm.toggleWrap()
-        assertEquals(WrapMode.WRAP, vm.uiState.value.settings.wrapMode)
-
-        // 行距 150 → 180 → 200 → 120 循环
-        vm.cycleLineHeight(); vm.cycleLineHeight(); vm.cycleLineHeight()
-        assertEquals(120, vm.uiState.value.settings.lineHeightPercent)
 
         // 字号端点不越界
         repeat(10) { vm.stepFontSize(1) }
@@ -439,33 +430,6 @@ class ReaderViewModelTest {
         advanceUntilIdle()
     }
 
-    /** G2（M10）：customFontPath 非空时 cycleFont 循环序列纳入 CUSTOM；为 null 维持三态循环 */
-    @Test
-    fun g2_cycleFont_includesCustomWhenPathSet() = runTest {
-        val (vm, _) = newViewModel(this)
-        advanceUntilIdle()
-
-        // 无 customFontPath：三态 CODE→SERIF→SANS→CODE
-        vm.setFont(ReaderFont.CODE)
-        vm.cycleFont()
-        assertEquals(ReaderFont.SERIF, vm.uiState.value.settings.font)
-        vm.cycleFont()
-        assertEquals(ReaderFont.SANS, vm.uiState.value.settings.font)
-        vm.cycleFont()
-        assertEquals(ReaderFont.CODE, vm.uiState.value.settings.font)
-
-        // 置 customFontPath（applyCustomFont 同时切到 CUSTOM）：四态序列 CODE→SERIF→SANS→CUSTOM→CODE
-        vm.applyCustomFont(tmpFolder.newFile("cycle_font.ttf").absolutePath)
-        assertEquals(ReaderFont.CUSTOM, vm.uiState.value.settings.font)
-        vm.cycleFont() // CUSTOM → CODE（从 CUSTOM 一步可达 CODE）
-        assertEquals(ReaderFont.CODE, vm.uiState.value.settings.font)
-        vm.setFont(ReaderFont.SANS)
-        vm.cycleFont() // SANS → CUSTOM
-        assertEquals(ReaderFont.CUSTOM, vm.uiState.value.settings.font)
-        vm.cycleFont() // CUSTOM → CODE
-        assertEquals(ReaderFont.CODE, vm.uiState.value.settings.font)
-    }
-
     /**
      * G2（M10）：applyCustomFont 重新导入成功后删除上一版旧字体文件（孤儿文件清理）；
      * 切换离开 CUSTOM 不删文件（允许切回）。用临时目录构造，勿动真机 files/fonts。
@@ -477,10 +441,11 @@ class ReaderViewModelTest {
         val oldFile = tmpFolder.newFile("old_font.ttf")
         val newFile = tmpFolder.newFile("new_font.ttf")
 
-        // 首次导入：仅记路径（无旧文件可清理）
+        // 首次导入：仅记路径（无旧文件可清理），并切换到 CUSTOM
         vm.applyCustomFont(oldFile.absolutePath)
         assertTrue(oldFile.exists())
         assertEquals(oldFile.absolutePath, vm.uiState.value.settings.customFontPath)
+        assertEquals(ReaderFont.CUSTOM, vm.uiState.value.settings.font)
 
         // 重新导入成功：旧字体文件被删除、路径更新到新文件
         vm.applyCustomFont(newFile.absolutePath)
