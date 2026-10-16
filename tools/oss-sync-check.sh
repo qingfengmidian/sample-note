@@ -45,7 +45,7 @@ if [ "$A" = "$B" ]; then
 fi
 
 echo "FAIL: 私仓与开源仓共享源码不一致："
-diff <(echo "$A") <(echo "$B") | grep '^[<>]' | awk '{print $1, $3}' \
-  | sed 's/^< /私仓独有或不同:/; s/^> /开源仓独有或不同:/'
+diff <(echo "$A") <(echo "$B") | grep '^[<>]' | awk '{print $1"\t"$NF}' \
+  | sed 's/^< \t/私仓独有或不同: /; s/^> \t/开源仓独有或不同: /'
 echo "（同一路径两侧都出现 = 内容不同；只出现一侧 = 一边缺失）"
 exit 1

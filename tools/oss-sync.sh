@@ -27,8 +27,9 @@ for f in gradlew gradlew.bat gradle.properties build.gradle.kts .gitignore \
   cp "$PRIVATE_DIR/$f" "$OSS_DIR/$f"
 done
 
-./oss-sync-check.sh
+# 先暂存再校验（校验比对的是 index blob，工作区改动须 add 后才可见）
 git -C "$OSS_DIR" add -A
+./oss-sync-check.sh
 if git -C "$OSS_DIR" diff --cached --quiet; then
   echo "同步后无变更（差异可能来自未跟踪文件，已忽略）。"
 else
