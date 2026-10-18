@@ -33,7 +33,8 @@ SHARED_PATHS=(
 )
 
 list_hashes() { # $1=仓库目录；输出 "<模式> <blob哈希> <路径>"，供整行比对
-  git -C "$1" ls-files -s -- "${SHARED_PATHS[@]}"
+  # 固定 core.quotePath=true，避免各仓本地配置（如显示中文路径）导致两侧转义形式不一致
+  git -C "$1" -c core.quotePath=true ls-files -s -- "${SHARED_PATHS[@]}"
 }
 
 A="$(list_hashes "$PRIVATE_DIR" | LC_ALL=C sort)"
