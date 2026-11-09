@@ -94,6 +94,52 @@ object FixtureGenerator {
             |结尾段落。
             |""".trimMargin())
 
+        // M20 新增（F2.18/TC-UT-20）：GFM 管道表夹具——① 标准三列对齐表（左/中/右）多行表体；
+        // ② 省略首尾竖线的表；③ 单元格含 \| 转义与加粗/行内代码；④ 围栏代码块内的假表格（不得识别）；
+        // ⑤ 缺分隔行的竖线文本（对照，不得识别）；⑥ 行数不齐（短行/长行各一）；⑦ 仅表头+分隔行无表体。
+        // 段落行号约定（测试断言据此）：0 表前段、1 表头、2 分隔行、3/4 表体、5 空行、
+        // 6 围栏开始、7/8 围栏内假表、9 围栏闭合、10 空行、11 省略竖线表头、12 分隔行、13 表体、14 空行、
+        // 15 转义表头、16 分隔行、17 表体、18 空行、19 对照文本、20 空行、
+        // 21 短行表头、22 分隔行、23 短行表体、24 长行表头、25 分隔行、26 长行表体、27 空行、
+        // 28 无表体表头、29 分隔行、30 表后段。
+        write(dir, "tables.md", Charsets.UTF_8, """
+            |表前段落。
+            |
+            || 名称 | 数量 | 单价 |
+            ||:-----|:----:|-----:|
+            || 苹果 | 10 | 5 |
+            || **香蕉** | `20` | 3 |
+            |
+            |```
+            || 围栏 | 表头 |
+            ||---|---|
+            || 围栏 | 表体 |
+            |```
+            |
+            | 左列 | 右列
+            |---|---
+            | 甲 | 乙
+            |
+            || 转义 | 说明 |
+            ||---|---|
+            || a\|b | 含 **加粗** 与 `代码` |
+            |
+            |这不是 | 表格（缺分隔行）
+            |
+            || 短行表 | 二列 | 三列 |
+            ||---|---|---|
+            || 只有一格 |
+            |
+            || 长行表 | 二列 |
+            ||---|---|
+            || 一 | 二 | 多余 |
+            |
+            || 仅表头 | 无表体 |
+            ||---|---|
+            |
+            |表后段落。
+            |""".trimMargin())
+
         write(dir, "sample.xml", Charsets.UTF_8, """
             |<?xml version="1.0" encoding="UTF-8"?>
             |<library>
@@ -712,6 +758,15 @@ object FixtureGenerator {
         check(headingLevels >= 6, "sample_toc.md 应含多级 ATX 标题（至少 H1~H6 各一）")
         check(tocMd.contains("```text") && tocMd.lines().any { it.startsWith("# 这是代码注释") },
             "sample_toc.md 应含围栏代码块且块内带 `#` 注释行")
+
+        // M20 新增（F2.18）：tables.md 七类场景自检——对齐表/省略竖线/转义/围栏假表/缺分隔行对照/行数不齐/无表体
+        val tablesMd = bytes("tables.md").toString(Charsets.UTF_8)
+        check(tablesMd.contains("|:----:|") && tablesMd.lines().count { it.startsWith("|") } >= 12,
+            "tables.md 应含对齐分隔行与多个管道表")
+        check(tablesMd.lines().any { it == "这不是 | 表格（缺分隔行）" },
+            "tables.md 应含缺分隔行的对照文本")
+        check(Regex("^```$", RegexOption.MULTILINE).findAll(tablesMd).count() == 2,
+            "tables.md 围栏代码块应闭合（块内假表格对照）")
 
         check(bytes("sample.xml").toString(Charsets.UTF_8).contains("<contact>"),
             "sample.xml 嵌套层级应 ≥ 3")

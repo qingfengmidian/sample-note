@@ -52,6 +52,58 @@ class MdViewMappingTest {
         assertEquals(0, m.paragraphIndexForBlock(emptyList(), 0))
     }
 
+    /**
+     * TC-UT-21（F2.18）：含 Table 块的块表映射——表体中间段落归其 Table 块
+     * （U4 源码↔预览切换与目录跳转经 startParagraphIndex 换算，映射函数零改动）。
+     * 块表手工构造（纯函数输入），与解析层实现解耦。
+     */
+    @Test
+    fun blockIndexForParagraph_tableBlock_mapsHeaderAndBodyLines() {
+        val table = com.sample.docreader.core.render.MarkdownBlock.Table(
+            header = listOf(
+                listOf(com.sample.docreader.core.render.MdInline.Text("表头")),
+                listOf(com.sample.docreader.core.render.MdInline.Text("二列"))
+            ),
+            aligns = listOf(com.sample.docreader.core.render.MdAlign.LEFT, com.sample.docreader.core.render.MdAlign.LEFT),
+            rows = listOf(
+                listOf(
+                    listOf(com.sample.docreader.core.render.MdInline.Text("表体")),
+                    listOf(com.sample.docreader.core.render.MdInline.Text("数据"))
+                )
+            ),
+            startParagraphIndex = 1
+        )
+        // 段落流：0 表前段、1 表头行、2 分隔行、3 表体行、4 表后段
+        val tableBlocks = listOf(
+            com.sample.docreader.core.render.MarkdownBlock.Paragraph(
+                listOf(com.sample.docreader.core.render.MdInline.Text("表前段落。")), 0),
+            table,
+            com.sample.docreader.core.render.MarkdownBlock.Paragraph(
+                listOf(com.sample.docreader.core.render.MdInline.Text("表后段落。")), 4)
+        )
+        val m = MdViewMapping
+        assertEquals(0, m.blockIndexForParagraph(tableBlocks, 0)) // 表前段
+        assertEquals(1, m.blockIndexForParagraph(tableBlocks, 1)) // 表头行 → Table
+        assertEquals(1, m.blockIndexForParagraph(tableBlocks, 2)) // 分隔行 → Table
+        assertEquals(1, m.blockIndexForParagraph(tableBlocks, 3)) // 表体行 → Table
+        assertEquals(2, m.blockIndexForParagraph(tableBlocks, 4)) // 表后段
+        assertEquals(1, m.paragraphIndexForBlock(tableBlocks, 1)) // Table → 表头行（S3 方案① 跳转落库语义）
+    }
+
+    /** TC-UT-21（F2.18）集成：parse 产出的含表块表与映射函数协同（依赖 MarkdownParser 表格识别，红态期失败） */
+    @Test
+    fun blockIndexForParagraph_parsedTable_integration() {
+        val paragraphs = listOf(
+            "表前段落。", "| a | b |", "|---|---|", "| 1 | 2 |", "表后段落。"
+        )
+        val parsedBlocks = MarkdownParser.parse(paragraphs)
+        assertEquals(3, parsedBlocks.size)
+        val m = MdViewMapping
+        assertEquals(1, m.blockIndexForParagraph(parsedBlocks, 2)) // 分隔行归 Table
+        assertEquals(1, m.blockIndexForParagraph(parsedBlocks, 3)) // 表体行归 Table
+        assertEquals(4, m.paragraphIndexForBlock(parsedBlocks, 2)) // 表后块起始段
+    }
+
     /** S11：可见段落 → 目录项；首可见段在首个标题之前返回 -1（无高亮） */
     @Test
     fun tocIndexAtParagraph_findsCurrentHeading() {

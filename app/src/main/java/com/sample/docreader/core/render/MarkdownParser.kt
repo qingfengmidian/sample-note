@@ -41,7 +41,22 @@ sealed class MarkdownBlock {
         val code: String,
         override val startParagraphIndex: Int
     ) : MarkdownBlock()
+
+    /**
+     * GFM 管道表（F2.18）：表头 + 分隔行必需（缺分隔行的竖线文本不识别为表格）；
+     * 行数不齐容错 = 短行补空单元格、长行截断（R1 拍板）。
+     * startParagraphIndex = 表头行行号（源码段落流坐标，U4 块↔段落映射经此换算，映射函数零改动）。
+     */
+    data class Table(
+        val header: List<List<MdInline>>,     // 表头各单元格（行内标记已解析）
+        val aligns: List<MdAlign>,            // 每列对齐，长度 = 列数
+        val rows: List<List<List<MdInline>>>, // 表体各行；每个单元格是 MdInline 列表
+        override val startParagraphIndex: Int
+    ) : MarkdownBlock()
 }
+
+/** 表格列对齐（F2.18）：GFM 分隔行冒号位置决定；无冒号默认左对齐 */
+enum class MdAlign { LEFT, CENTER, RIGHT }
 
 /** 行内片段：粗体/斜体/行内代码/普通文本 */
 sealed class MdInline {

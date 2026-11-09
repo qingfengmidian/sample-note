@@ -92,6 +92,23 @@ fun MarkdownPreview(
                             .background(theme.foreground.copy(alpha = 0.06f))
                             .padding(8.dp)
                     )
+                    // F2.18 M20a 占位：表格正式渲染（MdTable）归 M20b，本阶段按原文行输出避免非穷尽崩溃
+                    is MarkdownBlock.Table -> Text(
+                        (listOf(block.header) + block.rows).joinToString("\n") { row ->
+                            row.joinToString(" | ") { cell ->
+                                cell.joinToString("") { inline ->
+                                    when (inline) {
+                                        is MdInline.Text -> inline.text
+                                        is MdInline.Bold -> inline.text
+                                        is MdInline.Italic -> inline.text
+                                        is MdInline.Code -> inline.text
+                                    }
+                                }
+                            }
+                        },
+                        style = base,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
                 }
             }
         }
