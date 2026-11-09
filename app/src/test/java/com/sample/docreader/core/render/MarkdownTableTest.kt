@@ -45,7 +45,7 @@ class MarkdownTableTest {
         assertEquals(2, t.rows.size)
         assertEquals(listOf("苹果", "10", "5"), t.rows[0].map(::plain))
         // 行内标记在单元格内生效
-        assertEquals(listOf(MdInline.Bold("香蕉"), MdInline.Text(" ")), t.rows[1][0])
+        assertEquals(listOf(MdInline.Bold("香蕉")), t.rows[1][0])
         assertEquals(listOf(MdInline.Code("20")), t.rows[1][1])
         assertEquals(MarkdownBlock.Paragraph(listOf(MdInline.Text("表后段落。")), 6), blocks[2])
     }

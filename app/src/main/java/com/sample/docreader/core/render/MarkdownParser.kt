@@ -73,6 +73,12 @@ object MarkdownParser {
     private val UNORDERED = Regex("^[-*]\\s+(.*)$")
     private val ORDERED = Regex("^(\\d+)\\.\\s+(.*)$")
 
+    /**
+     * F2.18：GFM 管道表分隔行（整行匹配）。允许省略首尾竖线，单元格内容为 `-` 序列加可选冒号：
+     * `:---` 左对齐、`:-:`/`:--:` 居中、`---:` 右对齐、无冒号左对齐。
+     */
+    private val DELIMITER_ROW = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
+
     /** 逐行解析为块；空行跳过，``` 围栏合并为 CodeBlock。 */
     fun parse(paragraphs: List<String>): List<MarkdownBlock> {
         val blocks = mutableListOf<MarkdownBlock>()
@@ -96,12 +102,113 @@ object MarkdownParser {
                 }
                 line.isBlank() -> i++
                 else -> {
-                    blocks += parseBlock(line, i)
-                    i++
+                    val table = parseTable(paragraphs, i)
+                    if (table != null) {
+                        blocks += table.first
+                        i = table.second
+                    } else {
+                        blocks += parseBlock(line, i)
+                        i++
+                    }
                 }
             }
         }
         return blocks
+    }
+
+    /**
+     * F2.18：识别 GFM 管道表。成表条件 = 当前行「疑似表头」（trim 后含未转义 `|` 且非标题/引用/列表起始）
+     * 且下一行是合法分隔行；否则返回 null（缺分隔行的竖线文本按普通段落原文输出）。
+     * 返回 (Table, 下一个待解析的行号)——表体吞行截止后的下标，供 parse 主循环续读。
+     */
+    private fun parseTable(paragraphs: List<String>, headerIndex: Int): Pair<MarkdownBlock.Table, Int>? {
+        if (headerIndex + 1 >= paragraphs.size) return null
+        val headerLine = paragraphs[headerIndex]
+        if (!isTableHeaderCandidate(headerLine)) return null
+        if (!DELIMITER_ROW.matches(paragraphs[headerIndex + 1])) return null
+
+        val headerCells = splitCells(headerLine)
+        val columnCount = headerCells.size
+        // 对齐值以分隔行为准，长度按表头列数归一（补空填 LEFT、截断丢弃）
+        val alignValues = splitCells(paragraphs[headerIndex + 1]).map(::alignOf)
+        val aligns = List(columnCount) { col -> if (col < alignValues.size) alignValues[col] else MdAlign.LEFT }
+        val header = headerCells.map(::parseInline)
+
+        val rows = mutableListOf<List<List<MdInline>>>()
+        var i = headerIndex + 2 // 分隔行之后开始吞表体
+        while (i < paragraphs.size) {
+            if (Thread.currentThread().isInterrupted) break // 响应取消（AGENTS §5：非挂起循环用中断位尽早止损）
+            val line = paragraphs[i]
+            if (line.isBlank()) break // 空行截止
+            if (startsWithBlockSyntax(line)) break // 标题/引用/列表等块起始语法截止（如 `- a | b` 不入表）
+            if (!hasUnescapedPipe(line)) break // 不含未转义 `|` 的行截止
+            val cells = splitCells(line)
+            rows += List(columnCount) { col -> if (col < cells.size) parseInline(cells[col]) else emptyList() }
+            i++
+        }
+        return MarkdownBlock.Table(header, aligns, rows, headerIndex) to i
+    }
+
+    /** F2.18：表头候选 = trim 后含未转义 `|` 且非块起始语法（保持既有 Heading/List/Quote 优先级不变） */
+    private fun isTableHeaderCandidate(line: String): Boolean =
+        hasUnescapedPipe(line) && !startsWithBlockSyntax(line)
+
+    /** 行是否以块起始语法开头（标题/引用/无序与有序列表） */
+    private fun startsWithBlockSyntax(line: String): Boolean {
+        if (atxHeading(line) != null) return true
+        val trimmed = line.trimStart()
+        return trimmed.startsWith(">") ||
+            UNORDERED.matchEntire(trimmed) != null ||
+            ORDERED.matchEntire(trimmed) != null
+    }
+
+    /** 分隔行单元格 → 对齐（F2.18）：`:---` 左、`:-:`/`:--:` 中、`---:` 右、无冒号左 */
+    private fun alignOf(cell: String): MdAlign = when {
+        cell.startsWith(":") && cell.endsWith(":") -> MdAlign.CENTER
+        cell.startsWith(":") -> MdAlign.LEFT
+        cell.endsWith(":") -> MdAlign.RIGHT
+        else -> MdAlign.LEFT
+    }
+
+    /** 行内是否含未转义的 `|`（`\|` 为转义管道，不当分隔符） */
+    private fun hasUnescapedPipe(line: String): Boolean {
+        var backslashes = 0
+        for (c in line) {
+            when (c) {
+                '\\' -> backslashes++
+                '|' -> if (backslashes % 2 == 0) return true else backslashes = 0
+                else -> backslashes = 0
+            }
+        }
+        return false
+    }
+
+    /**
+     * F2.18：按未转义 `|` 切分表格行。支持省略首尾竖线（显式首尾竖线产生的空单元格丢弃，中间的
+     * 空单元格保留）；`\|` 还原为字面 `|`（转义符剥除）；每个单元格 trim。
+     */
+    private fun splitCells(line: String): List<String> {
+        val trimmed = line.trim()
+        val raw = mutableListOf<String>()
+        var sb = StringBuilder()
+        var i = 0
+        while (i < trimmed.length) {
+            val c = trimmed[i]
+            when {
+                c == '\\' && i + 1 < trimmed.length && trimmed[i + 1] == '|' -> {
+                    sb.append('|') // 转义管道：还原字面 |，剥除转义符
+                    i += 2
+                }
+                c == '\\' -> { sb.append('\\'); i++ } // 其他反斜杠原样保留
+                c == '|' -> { raw += sb.toString(); sb = StringBuilder(); i++ }
+                else -> { sb.append(c); i++ }
+            }
+        }
+        raw += sb.toString()
+        // 丢弃显式首尾竖线产生的空单元格（省略首尾竖线时天然无空段）
+        if (raw.isNotEmpty() && raw.first().isEmpty() && trimmed.startsWith("|")) raw.removeAt(0)
+        if (raw.isNotEmpty() && raw.last().isEmpty() && trimmed.endsWith("|")) raw.removeAt(raw.lastIndex)
+        return raw.map { it.trim() }
     }
 
     private fun parseBlock(line: String, paragraphIndex: Int): MarkdownBlock {
