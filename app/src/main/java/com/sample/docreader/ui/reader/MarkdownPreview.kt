@@ -127,6 +127,9 @@ val MdTableCellBoldKey = SemanticsPropertyKey<Boolean>("MdTableCellBold")
 val MdTableCellAlignKey = SemanticsPropertyKey<TextAlign>("MdTableCellAlign")
 val MdTableHorizontalScrollKey = SemanticsPropertyKey<Boolean>("MdTableHorizontalScroll")
 
+/** F2.18（M21）列宽语义键：表格容器节点携带每列实际渲染宽度（dp），供 UI 测试断言内容自适应分配（TC-UI-23） */
+val MdTableColumnWidthsKey = SemanticsPropertyKey<List<Dp>>("MdTableColumnWidths")
+
 /** 列最小宽度（R2 拍板：默认 96dp，实现可调常量） */
 private val MD_TABLE_MIN_COLUMN_WIDTH = 96.dp
 /** 表头行底部分隔线透明度（主题前景低透明度，深/浅主题均可见） */
