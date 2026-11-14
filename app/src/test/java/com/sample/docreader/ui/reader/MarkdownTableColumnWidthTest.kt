@@ -119,10 +119,8 @@ class MarkdownTableColumnWidthTest {
     fun largeTable_measureAndCompose_performanceBaseline() {
         val rows = (1..80).joinToString("\n") { "| 数据$it | 内容${it}号 | 第三列值$it | 第四列$it | 第五$it | 第六列$it |" }
         val md = "| 表头一 | 表头二 | 表头三 | 表头四 | 表头五 | 表头六 |\n|---|---|---|---|---|---|\n$rows"
-        setPreview(md.lines())
         val start = System.nanoTime()
-        setPreview(md.lines()) // 二次组合含测量路径
-        composeRule.waitForIdle()
+        setPreview(md.lines()) // 单次组合即含测量路径（setContent 仅可调用一次；测量经 remember(block) 缓存）
         val elapsedMs = (System.nanoTime() - start) / 1_000_000
         assertTrue("80×6 表格测量+组合耗时 ${elapsedMs}ms，应 ≤ 3000ms", elapsedMs <= 3000)
     }
