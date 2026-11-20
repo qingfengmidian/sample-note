@@ -10,3 +10,6 @@ app/src/test/resources/fixtures/
 app/src/debug/assets/fixtures/
 .kimi-code/
 .vmark/
+# 软件著作权登记材料（2026-11-20 决定不再申请，材料保留本机、不入库）
+docs/copyright/
+tools/copyright/
