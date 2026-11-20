@@ -1,6 +1,6 @@
 # 任务简报：v0.0.1 一致性卫生批次（代码部分）
 
-项目：/Users/xukk/code/sample-note（Android/Kotlin/Compose，请先读 AGENTS.md 了解约定）
+项目：本仓库（Android/Kotlin/Compose，请先读 AGENTS.md 了解约定）
 基线：main 最新提交（a3ad5ee 之后仅文档改动）。这是一次小修批次，**严格按清单执行，不要扩 scope、不要重构无关代码**。
 
 ## 纪律（必须遵守）
