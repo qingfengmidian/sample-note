@@ -14,9 +14,15 @@
 - **其他**：应用内语言切换（中文/English）、复制后一键「问 AI」
 - **存储**：遵循 scoped storage，仅通过 SAF 访问用户主动选择的文件，不申请 `MANAGE_EXTERNAL_STORAGE`
 
-<!-- TODO: 截图（建议：主界面/阅读器/设置页各一张，放 docs/screenshots/ 或 .github/）
-![阅读器截图](docs/screenshots/reader.png)
--->
+## 界面
+
+| 主界面 | 阅读器 | Markdown 预览 |
+| --- | --- | --- |
+| ![主界面](docs/screenshots/home.png) | ![阅读器](docs/screenshots/reader.png) | ![Markdown 预览](docs/screenshots/preview-md.png) |
+
+设置页：
+
+![设置页](docs/screenshots/settings.png)
 
 ## 构建与测试
 
