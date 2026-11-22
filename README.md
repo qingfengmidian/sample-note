@@ -54,4 +54,4 @@ Kotlin 2.0 / Jetpack Compose (Material 3) / MVVM + StateFlow / Room + DataStore 
 
 ## License
 
-[Apache License 2.0](LICENSE)。各源文件头部保留的版权注释（如有）与此一致。
+[Apache License 2.0](LICENSE)。版权所有 © 2026 清风米店（qingfengmidian），以 Apache-2.0 发布。各源文件头部保留的版权注释（如有）与此一致。
