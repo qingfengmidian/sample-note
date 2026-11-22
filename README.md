@@ -2,9 +2,7 @@
 
 一款运行于 Android 的轻量级本地文档阅读/编辑器：阅读 epub / xml / md / txt，编辑 md / txt。纯本地应用——**不联网、无账号、不采集任何数据**。
 
-<!-- TODO: 发布后取消注释 CI badge
-[![CI](https://github.com/<org>/<repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<org>/<repo>/actions/workflows/ci.yml)
--->
+[![CI](https://github.com/qingfengmidian/sample-note/actions/workflows/ci.yml/badge.svg)](https://github.com/qingfengmidian/sample-note/actions/workflows/ci.yml)
 
 ## 特性
 
